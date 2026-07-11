@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native builds (managed workflow keeps these out of source control)
+ios/
+android/
+
+# Metro
+.metro-health-check*
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# Env / local
+.env*.local
+
+# TypeScript
+*.tsbuildinfo

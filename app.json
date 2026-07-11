@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "TruckSetu",
+    "slug": "trucksetu",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "backgroundColor": "#0F2A5C",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.trucksetu.app",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "TruckSetu uses the camera to capture Proof of Delivery (POD) documents so escrow payments can be released."
+        }
+      ]
+    ]
+  }
+}
