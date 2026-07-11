@@ -13,6 +13,24 @@ npm run typecheck  # strict TS check, no emit
 
 No native config, API keys or prebuild required — runs directly in Expo Go.
 
+## Deploy the web preview (Vercel)
+
+The app also exports as a static website via React Native Web:
+
+```bash
+npm run build   # expo export --platform web  →  dist/
+```
+
+`vercel.json` already configures the build command, `dist` output directory
+and SPA fallback rewrite, so connecting this repo to Vercel just works. If
+you created the Vercel project before this file existed, either redeploy the
+latest commit, or set it manually under Project → Settings → Build &
+Development Settings: Framework Preset **Other**, Build Command
+`npx expo export --platform web`, Output Directory `dist`.
+
+Note: the website is a demo/preview surface — the product target is the
+native app via Expo Go / EAS builds.
+
 ## Tech stack
 
 | Concern            | Choice                                                       |
