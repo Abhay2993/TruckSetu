@@ -19,7 +19,6 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -35,6 +34,7 @@ import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { EscrowShipment, ProofOfDelivery } from '../../types';
+import { notify } from '../../utils/dialog';
 import { formatINR, formatTime } from '../../utils/format';
 
 const STAGE_LABEL: Record<EscrowShipment['stage'], string> = {
@@ -66,14 +66,14 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   // gate needs to know whether the POD actually attached.
   const attach = (shipmentId: string, pod: ProofOfDelivery) => {
     attachPod(shipmentId, pod);
-    Alert.alert('POD attached', 'The dealer can now release your balance payment.');
+    notify('POD attached', 'The dealer can now release your balance payment.');
   };
 
   const capturePodPhoto = async (shipmentId: string) => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Camera permission needed', 'Allow camera access to photograph the POD.');
+        notify('Camera permission needed', 'Allow camera access to photograph the POD.');
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
@@ -87,7 +87,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       });
     } catch (error) {
       console.warn('[pod] camera capture failed', error);
-      Alert.alert('Could not open camera', 'Please try again or attach a file instead.');
+      notify('Could not open camera', 'Please try again or attach a file instead.');
     }
   };
 
@@ -107,7 +107,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       });
     } catch (error) {
       console.warn('[pod] document pick failed', error);
-      Alert.alert('Could not open files', 'Please try again or use the camera instead.');
+      notify('Could not open files', 'Please try again or use the camera instead.');
     }
   };
 

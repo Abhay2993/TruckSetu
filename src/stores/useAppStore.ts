@@ -34,8 +34,15 @@ export const useAppStore = create<AppState>()(
       name: 'trucksetu-app',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (s) => ({ role: s.role, locale: s.locale }),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
+      onRehydrateStorage: () => (state, error) => {
+        // Mark hydration complete even when the read fails (state is
+        // undefined on error) — otherwise RootNavigator's loading gate
+        // would spin forever on a corrupted/unavailable AsyncStorage.
+        if (error || !state) {
+          useAppStore.setState({ hasHydrated: true });
+        } else {
+          state.setHasHydrated(true);
+        }
       },
     },
   ),

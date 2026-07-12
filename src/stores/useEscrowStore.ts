@@ -136,6 +136,19 @@ export const useEscrowStore = create<EscrowState>()(
               `Balance released from escrow (ref ${referenceId})`,
             ),
           }));
+        } catch {
+          // Payment API failed — stay in POD_UPLOADED so the dealer can
+          // retry, and record the attempt in the audit trail. Without this
+          // catch the rejection would escape as an unhandled promise
+          // rejection (screens call this fire-and-forget).
+          set((s) => ({
+            shipments: transition(
+              s.shipments,
+              shipmentId,
+              'POD_UPLOADED',
+              'Balance release failed — tap Release Balance to retry',
+            ),
+          }));
         } finally {
           set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
         }

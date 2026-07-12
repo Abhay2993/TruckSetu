@@ -7,7 +7,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -24,6 +23,7 @@ import { useTranslation } from '../../i18n/i18n';
 import { useLoadsStore } from '../../stores/useLoadsStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Load } from '../../types';
+import { confirmAction, notify } from '../../utils/dialog';
 import { formatINR, timeAgo } from '../../utils/format';
 
 export function DealerLoadsScreen(): React.JSX.Element {
@@ -32,15 +32,13 @@ export function DealerLoadsScreen(): React.JSX.Element {
   const acceptBid = useLoadsStore((s) => s.acceptBid);
   const [showPostModal, setShowPostModal] = useState(false);
 
-  const handleAccept = (load: Load, bidId: string, driverName: string) => {
-    Alert.alert(
+  const handleAccept = async (load: Load, bidId: string, driverName: string) => {
+    const ok = await confirmAction(
       'Accept bid?',
       `Book ${driverName} for ${load.origin} → ${load.destination}? An escrow shipment will be created.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Accept', style: 'default', onPress: () => acceptBid(load.id, bidId) },
-      ],
+      'Accept',
     );
+    if (ok) acceptBid(load.id, bidId);
   };
 
   return (
@@ -99,7 +97,7 @@ export function DealerLoadsScreen(): React.JSX.Element {
                     <Text style={styles.bidAmount}>{formatINR(bid.amountInr)}</Text>
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => handleAccept(load, bid.id, bid.driverName)}
+                      onPress={() => void handleAccept(load, bid.id, bid.driverName)}
                       style={({ pressed }) => [styles.acceptBtn, pressed && { opacity: 0.8 }]}
                     >
                       <Text style={styles.acceptBtnText}>Accept</Text>
@@ -139,11 +137,11 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
     const weightTonnes = Number(weight);
     const priceInr = Number(price);
     if (!origin.trim() || !destination.trim() || !material.trim()) {
-      Alert.alert('Missing details', 'Origin, destination and material are required.');
+      notify('Missing details', 'Origin, destination and material are required.');
       return;
     }
     if (!Number.isFinite(weightTonnes) || weightTonnes <= 0 || !Number.isFinite(priceInr) || priceInr <= 0) {
-      Alert.alert('Invalid numbers', 'Weight and freight amount must be positive numbers.');
+      notify('Invalid numbers', 'Weight and freight amount must be positive numbers.');
       return;
     }
     postLoad({

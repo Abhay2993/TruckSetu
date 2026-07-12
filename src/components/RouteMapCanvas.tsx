@@ -17,7 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
 import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { ROUTE_PATH } from '../data/mock';
-import { colors, fontSizes, radii, spacing } from '../theme';
+import { colors, fontSizes, radii } from '../theme';
 import type { Amenity } from '../types';
 
 interface RouteMapCanvasProps {
@@ -246,8 +246,5 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
-  },
-  spacer: {
-    height: spacing.sm,
   },
 });

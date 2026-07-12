@@ -14,7 +14,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AmenityCard } from '../../components/AmenityCard';
 import { FastagCard } from '../../components/FastagCard';
@@ -26,6 +26,7 @@ import { useTranslation } from '../../i18n/i18n';
 import { useGpsSimulator } from '../../services/gpsSimulator';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Amenity } from '../../types';
+import { notify } from '../../utils/dialog';
 import { formatTime } from '../../utils/format';
 
 type AmenityFilter = 'all' | 'veg' | 'nonveg' | 'parking' | 'mechanic';
@@ -66,7 +67,7 @@ export function DriverRouteScreen(): React.JSX.Element {
 
   const handleNavigate = (amenity: Amenity) => {
     // Placeholder until deep-linking into Google Maps navigation lands.
-    Alert.alert('Start navigation', `Routing you to ${amenity.name} (${amenity.distanceKm} km ahead).`);
+    notify('Start navigation', `Routing you to ${amenity.name} (${amenity.distanceKm} km ahead).`);
   };
 
   return (

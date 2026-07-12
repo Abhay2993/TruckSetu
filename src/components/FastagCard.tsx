@@ -6,10 +6,11 @@
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from '../i18n/i18n';
 import { LOW_BALANCE_THRESHOLD_INR, useFastagStore } from '../stores/useFastagStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../theme';
+import { notify } from '../utils/dialog';
 import { formatINR } from '../utils/format';
 
 const QUICK_AMOUNTS = [500, 1000, 2000] as const;
@@ -26,9 +27,9 @@ export function FastagCard(): React.JSX.Element {
   const handleTopUp = async () => {
     const ok = await topUp(selectedAmount);
     if (ok) {
-      Alert.alert('Top-up successful', `${formatINR(selectedAmount)} added via UPI.`);
+      notify('Top-up successful', `${formatINR(selectedAmount)} added via UPI.`);
     } else {
-      Alert.alert('Top-up failed', 'UPI payment could not be completed. Please try again.');
+      notify('Top-up failed', 'UPI payment could not be completed. Please try again.');
     }
   };
 
