@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { RouteMapCanvas } from '../../components/RouteMapCanvas';
+import { RouteMap } from '../../components/RouteMap';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useEscrowStore } from '../../stores/useEscrowStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
@@ -45,7 +45,7 @@ export function DealerShipmentsScreen(): React.JSX.Element {
       <ScreenHeader />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>Live shipment tracking</Text>
-        <RouteMapCanvas
+        <RouteMap
           amenities={[]}
           truckProgress={progress}
           originLabel="Delhi"

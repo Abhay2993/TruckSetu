@@ -127,7 +127,10 @@ export interface Amenity {
   /** Distance ahead of the truck along the current route. */
   distanceKm: number;
   rating: number;
-  /** Normalised 0..1 position on the simulated map canvas. */
+  /** Real GPS position — used by the native react-native-maps view. */
+  latitude: number;
+  longitude: number;
+  /** Normalised 0..1 position on the simulated web/canvas map. */
   mapX: number;
   mapY: number;
   /** Dhaba-only flags — undefined for mechanics. */

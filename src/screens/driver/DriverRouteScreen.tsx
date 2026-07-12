@@ -18,7 +18,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AmenityCard } from '../../components/AmenityCard';
 import { FastagCard } from '../../components/FastagCard';
-import { RouteMapCanvas } from '../../components/RouteMapCanvas';
+import { RouteMap } from '../../components/RouteMap';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { AMENITIES } from '../../data/mock';
 import { useOfflineTelemetry } from '../../hooks/OfflineTelemetryHook';
@@ -61,7 +61,7 @@ export function DriverRouteScreen(): React.JSX.Element {
   // Feature D wiring: every simulated GPS tick flows through recordPoint,
   // which routes it live to the API or into the persisted offline cache.
   const telemetry = useOfflineTelemetry();
-  const { routeProgress, currentSpeed } = useGpsSimulator(telemetry.recordPoint, true);
+  const { routeProgress, currentSpeed, lastPoint } = useGpsSimulator(telemetry.recordPoint, true);
 
   const filtered = useMemo(() => applyFilter(AMENITIES, filter), [filter]);
 
@@ -83,10 +83,11 @@ export function DriverRouteScreen(): React.JSX.Element {
           </View>
         )}
 
-        {/* Live route map */}
-        <RouteMapCanvas
+        {/* Live route map — real map on phones, canvas on web */}
+        <RouteMap
           amenities={filtered}
           truckProgress={routeProgress}
+          lastPoint={lastPoint}
           originLabel="Delhi"
           destinationLabel="Jaipur"
         />

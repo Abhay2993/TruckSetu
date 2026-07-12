@@ -27,6 +27,23 @@ export const ROUTE_GPS = {
   end: { latitude: 26.9124, longitude: 75.7873 },
 };
 
+/**
+ * Real NH-48 corridor waypoints (Delhi → Gurugram → Behror → Kotputli →
+ * Jaipur) — the polyline drawn by the native map. The canvas map uses the
+ * normalised ROUTE_PATH above; both describe the same trip.
+ */
+export const ROUTE_WAYPOINTS: { latitude: number; longitude: number }[] = [
+  { latitude: 28.6139, longitude: 77.209 },
+  { latitude: 28.4595, longitude: 77.0266 },
+  { latitude: 28.2181, longitude: 76.8465 },
+  { latitude: 27.9924, longitude: 76.6066 },
+  { latitude: 27.8886, longitude: 76.2814 },
+  { latitude: 27.7025, longitude: 76.1993 },
+  { latitude: 27.4924, longitude: 76.1305 },
+  { latitude: 27.1767, longitude: 75.9982 },
+  { latitude: 26.9124, longitude: 75.7873 },
+];
+
 export const AMENITIES: Amenity[] = [
   {
     id: 'am-1',
@@ -34,6 +51,8 @@ export const AMENITIES: Amenity[] = [
     name: 'Sharma Vaishno Dhaba',
     distanceKm: 12,
     rating: 4.4,
+    latitude: 28.354,
+    longitude: 76.937,
     mapX: 0.24,
     mapY: 0.58,
     servesVeg: true,
@@ -46,6 +65,8 @@ export const AMENITIES: Amenity[] = [
     name: 'Highway King, Behror',
     distanceKm: 38,
     rating: 4.1,
+    latitude: 27.889,
+    longitude: 76.285,
     mapX: 0.47,
     mapY: 0.44,
     servesVeg: true,
@@ -58,6 +79,8 @@ export const AMENITIES: Amenity[] = [
     name: 'Punjabi Tadka Dhaba',
     distanceKm: 57,
     rating: 3.9,
+    latitude: 27.701,
+    longitude: 76.198,
     mapX: 0.63,
     mapY: 0.3,
     servesVeg: false,
@@ -70,6 +93,8 @@ export const AMENITIES: Amenity[] = [
     name: 'Tata Authorised Service, Shahjahanpur',
     distanceKm: 24,
     rating: 4.6,
+    latitude: 27.993,
+    longitude: 76.607,
     mapX: 0.36,
     mapY: 0.64,
     isCertified: true,
@@ -80,6 +105,8 @@ export const AMENITIES: Amenity[] = [
     name: 'Bharat Tyre & Puncture Works',
     distanceKm: 61,
     rating: 4.0,
+    latitude: 27.492,
+    longitude: 76.13,
     mapX: 0.76,
     mapY: 0.24,
     isCertified: false,
