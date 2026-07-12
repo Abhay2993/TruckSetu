@@ -7,12 +7,25 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "backgroundColor": "#0F2A5C",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F2A5C"
+    },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.trucksetu.app",
+      "buildNumber": "1"
     },
     "android": {
       "package": "com.trucksetu.app",
-      "edgeToEdgeEnabled": true
+      "versionCode": 1,
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F2A5C"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"

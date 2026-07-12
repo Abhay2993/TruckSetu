@@ -53,6 +53,55 @@ The escrow stage machine is enforced **server-side** (releasing before a POD
 exists returns 409) — the app's local checks are UX, the server is truth.
 Env: `PORT`, `JWT_SECRET` (set in production!), `DATA_FILE`, `NODE_ENV`.
 
+## Maps
+
+Phones render a **real map** (react-native-maps: Google Maps on Android,
+Apple Maps on iOS) with the NH-48 route polyline, dhaba/mechanic markers and
+the live truck position from telemetry. The web build automatically falls
+back to the lightweight canvas map — Metro picks `RouteMap.native.tsx` on
+devices and `RouteMap.tsx` elsewhere.
+
+Expo Go works out of the box. **Standalone Android builds need your own
+Google Maps key**: add to `app.json` →
+`android.config.googleMaps.apiKey` (get one from the Google Cloud console,
+enable "Maps SDK for Android"). iOS needs nothing.
+
+## Payments
+
+Two rails, both env-switched in `server/src/payments.ts`:
+
+- **FASTag top-up (UPI intent)** — on phones the app opens the user's UPI
+  app (GPay/PhonePe/Paytm) with a pre-filled payment via a `upi://pay` deep
+  link from `POST /v1/fastag/topup/intent`. Set `UPI_PAYEE_VPA` to your
+  collection VPA. Production: credit the wallet from the PSP webhook, not
+  the in-app confirmation.
+- **Escrow payouts (RazorpayX)** — dispatch/release call `executePayout`,
+  which hits the RazorpayX Payouts API when `RAZORPAY_KEY_ID`,
+  `RAZORPAY_KEY_SECRET` and `RAZORPAYX_ACCOUNT_NUMBER` are set, and
+  simulates otherwise. `POST /v1/payments/webhook` verifies Razorpay's
+  HMAC-SHA256 signature (constant-time compare) — set
+  `RAZORPAY_WEBHOOK_SECRET` and point the Razorpay dashboard at it.
+
+## Ship to stores (EAS)
+
+Icons, splash, bundle ids and `eas.json` build profiles are already in the
+repo. From a machine with an [Expo account](https://expo.dev):
+
+```bash
+npm install -g eas-cli
+eas login
+eas build -p android --profile preview     # installable APK for testing
+eas build -p android --profile production  # AAB for the Play Store
+eas build -p ios --profile production      # needs an Apple Developer account
+eas submit -p android                      # upload to Play Console
+```
+
+Before the production build: set the real backend URL in `eas.json` →
+`build.production.env.EXPO_PUBLIC_API_URL`, and add the Google Maps key
+(above). Play Store needs a one-time $25 developer account and a service
+account JSON for `eas submit`; App Store needs the $99/yr Apple Developer
+Program.
+
 ## Authentication
 
 Phone-OTP (the norm for drivers): enter a 10-digit number → 6-digit OTP →
