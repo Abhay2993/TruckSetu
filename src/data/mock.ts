@@ -134,6 +134,7 @@ export const SEED_LOADS: Load[] = [
     priceInr: 42000,
     advancePercent: 70,
     status: 'open',
+    consignmentNo: 'LR-48213',
     bids: [
       bid('bid-1', 'Gurpreet Singh', 'PB 10 AB 4321', 41000, 4.7, true),
       bid('bid-2', 'Ramesh Yadav', 'RJ 14 CD 8890', 43500, 4.2, false),
@@ -220,6 +221,8 @@ export const SEED_SETTLED_SHIPMENT: EscrowShipment = {
  */
 export const SEED_SHIPMENT: EscrowShipment = {
   id: 'shp-1',
+  consignmentNo: 'LR-48213',
+  disputeId: null,
   loadId: 'load-0',
   origin: 'Delhi',
   destination: 'Jaipur',

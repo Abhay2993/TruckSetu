@@ -7,7 +7,7 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTranslation } from '../i18n/i18n';
 import { api } from '../services/api';
 import { LOW_BALANCE_THRESHOLD_INR, useFastagStore } from '../stores/useFastagStore';
@@ -22,9 +22,19 @@ export function FastagCard(): React.JSX.Element {
   const balanceInr = useFastagStore((s) => s.balanceInr);
   const isToppingUp = useFastagStore((s) => s.isToppingUp);
   const topUp = useFastagStore((s) => s.topUp);
+  const autoRecharge = useFastagStore((s) => s.autoRecharge);
+  const setAutoRecharge = useFastagStore((s) => s.setAutoRecharge);
+  const payToll = useFastagStore((s) => s.payToll);
   const [selectedAmount, setSelectedAmount] = useState<number>(500);
 
   const isLow = balanceInr < LOW_BALANCE_THRESHOLD_INR;
+
+  const handleToll = async () => {
+    const { autoRecharged } = await payToll(250, 'Shahjahanpur Plaza');
+    if (autoRecharged) {
+      notify('Auto-recharge triggered', `Balance dropped below ${formatINR(autoRecharge.thresholdInr)} — ${formatINR(autoRecharge.topUpInr)} added automatically.`);
+    }
+  };
 
   const handleTopUp = async () => {
     // Real-UPI path (phones, server mode): open the user's UPI app with a
@@ -116,6 +126,35 @@ export function FastagCard(): React.JSX.Element {
           </>
         )}
       </Pressable>
+
+      {/* Feature 14: auto-recharge rule */}
+      <View style={styles.autoRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.autoTitle}>Auto-recharge</Text>
+          <Text style={styles.autoSub}>
+            {autoRecharge.enabled
+              ? `On · +${formatINR(autoRecharge.topUpInr)} when below ${formatINR(autoRecharge.thresholdInr)}`
+              : 'Off · never run dry at a toll'}
+          </Text>
+        </View>
+        <Switch
+          value={autoRecharge.enabled}
+          onValueChange={(enabled) => void setAutoRecharge({ ...autoRecharge, enabled })}
+          trackColor={{ true: colors.accent, false: 'rgba(255,255,255,0.3)' }}
+          thumbColor={colors.textInverse}
+        />
+      </View>
+
+      {/* Demo the rule: a toll debit that may trigger the auto top-up */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Simulate toll"
+        onPress={handleToll}
+        style={({ pressed }) => [styles.tollButton, pressed && { opacity: 0.7 }]}
+      >
+        <MaterialCommunityIcons name="boom-gate-arrow-up" size={14} color={colors.textInverse} />
+        <Text style={styles.tollButtonText}>Simulate toll (₹250)</Text>
+      </Pressable>
     </LinearGradient>
   );
 }
@@ -203,5 +242,40 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: fontSizes.md,
     fontWeight: '800',
+  },
+  autoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.15)',
+    paddingTop: spacing.md,
+    marginTop: 2,
+  },
+  autoTitle: {
+    color: colors.textInverse,
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+  },
+  autoSub: {
+    color: colors.textInverse,
+    opacity: 0.75,
+    fontSize: fontSizes.xs,
+    marginTop: 1,
+  },
+  tollButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: radii.sm,
+    paddingVertical: spacing.sm,
+  },
+  tollButtonText: {
+    color: colors.textInverse,
+    fontSize: fontSizes.xs,
+    fontWeight: '700',
   },
 });

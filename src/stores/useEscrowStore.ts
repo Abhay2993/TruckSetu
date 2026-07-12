@@ -18,9 +18,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import { isServerMode } from '../config';
 import { SEED_SETTLED_SHIPMENT, SEED_SHIPMENT } from '../data/mock';
 import { api } from '../services/api';
-import type { EscrowShipment, EscrowStage, ProofOfDelivery } from '../types';
+import type { EscrowShipment, EscrowStage, NotificationKind, ProofOfDelivery } from '../types';
+import { useNotificationsStore } from './useNotificationsStore';
+
+/**
+ * Emit an in-app notification for an escrow event — demo mode only, because
+ * in server mode the backend already creates the authoritative record (which
+ * refresh() pulls). Avoids double notifications.
+ */
+function localNotify(
+  kind: NotificationKind,
+  title: string,
+  body: string,
+  shipmentId: string,
+): void {
+  if (isServerMode) return;
+  useNotificationsStore.getState().add(kind, title, body, shipmentId);
+}
 
 interface EscrowState {
   shipments: EscrowShipment[];
@@ -94,6 +111,7 @@ export const useEscrowStore = create<EscrowState>()(
               `Advance paid to fuel card (ref ADV-${shipmentId}-${advanceInr})`,
             ),
           }));
+          localNotify('advance_paid', 'Advance paid to fuel card', `₹${advanceInr} released`, shipmentId);
         } catch {
           // Payout failed — roll back so the dealer can retry dispatch.
           set((s) => ({
@@ -118,17 +136,29 @@ export const useEscrowStore = create<EscrowState>()(
       attachPod: async (shipmentId, pod) => {
         const shipment = get().shipments.find((s) => s.id === shipmentId);
         if (!shipment || shipment.stage !== 'ADVANCE_PAID') return;
+        // OCR verification (Feature 12): compare the number read off the POD
+        // to what the load promised. Server recomputes authoritatively; this
+        // gives demo mode the same verified/mismatch signal.
+        const verified = Boolean(
+          shipment.consignmentNo && pod.ocrConsignmentNo && pod.ocrConsignmentNo === shipment.consignmentNo,
+        );
+        const verifiedPod = { ...pod, verified };
+        const label = verified
+          ? `POD uploaded & verified (consignment ${pod.ocrConsignmentNo})`
+          : shipment.consignmentNo
+            ? `POD uploaded — consignment mismatch (read ${pod.ocrConsignmentNo ?? 'none'}, expected ${shipment.consignmentNo})`
+            : `POD uploaded (${pod.fileName})`;
         // Optimistic local transition — the POD file lives on-device, so the
         // driver's copy is correct regardless of connectivity.
         set((s) => ({
-          shipments: transition(
-            s.shipments,
-            shipmentId,
-            'POD_UPLOADED',
-            `POD uploaded (${pod.fileName})`,
-            { pod },
-          ),
+          shipments: transition(s.shipments, shipmentId, 'POD_UPLOADED', label, { pod: verifiedPod }),
         }));
+        localNotify(
+          'pod_uploaded',
+          verified ? 'POD uploaded & verified' : 'POD uploaded — needs review',
+          verified ? 'Consignment matches' : 'Check the consignment number',
+          shipmentId,
+        );
         try {
           const remote = await api.uploadPod(shipmentId, pod);
           if (remote) {
@@ -151,6 +181,9 @@ export const useEscrowStore = create<EscrowState>()(
         const shipment = get().shipments.find((s) => s.id === shipmentId);
         // The guard that makes this "escrow": no POD, no release.
         if (!shipment || shipment.stage !== 'POD_UPLOADED') return;
+        // Feature 13: an open dispute freezes the money (server enforces the
+        // same; this keeps the demo honest and avoids a doomed request).
+        if (shipment.disputeId) return;
 
         set((s) => ({ processingIds: [...s.processingIds, shipmentId] }));
         const { balanceInr } = splitAmounts(shipment);
@@ -172,6 +205,7 @@ export const useEscrowStore = create<EscrowState>()(
               `Balance released from escrow (ref BAL-${shipmentId}-${balanceInr})`,
             ),
           }));
+          localNotify('balance_released', 'Balance released!', `₹${balanceInr} paid — trip settled`, shipmentId);
         } catch {
           // Payment API failed — stay in POD_UPLOADED so the dealer can
           // retry, and record the attempt in the audit trail. Without this

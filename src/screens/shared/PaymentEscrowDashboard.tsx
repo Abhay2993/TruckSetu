@@ -27,10 +27,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ChatSheet } from '../../components/ChatSheet';
+import { DisputePanel } from '../../components/DisputePanel';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
 import { RatingStars } from '../../components/RatingStars';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
+import { readConsignmentNo } from '../../services/ocr';
 import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
@@ -57,23 +60,25 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   const rateShipment = useEscrowStore((s) => s.rateShipment);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const shipment = useMemo(
     () => shipments.find((s) => s.id === selectedId) ?? shipments[0],
     [shipments, selectedId],
   );
 
   // ---- POD capture (driver) ----------------------------------------------
-  // Both pickers funnel into one attach path; every failure surfaces as an
-  // Alert instead of a silent no-op, because a driver standing at a delivery
-  // gate needs to know whether the POD actually attached.
-  const attach = (shipmentId: string, pod: ProofOfDelivery) => {
-    // Optimistic: the store transitions locally first and mirrors to the
-    // server in the background (see useEscrowStore.attachPod).
-    void attachPod(shipmentId, pod);
-    notify('POD attached', 'The dealer can now release your balance payment.');
+  // Both pickers funnel into one attach path. Before attaching, OCR reads the
+  // consignment number off the POD (Feature 12) so the store/server can flag
+  // a mismatch before the dealer releases the balance.
+  const attach = async (shipmentId: string, pod: ProofOfDelivery, expected?: string) => {
+    const ocr = await readConsignmentNo(pod.uri, expected);
+    // Optimistic: the store transitions locally first, computes verified, and
+    // mirrors to the server in the background (see useEscrowStore.attachPod).
+    void attachPod(shipmentId, { ...pod, ocrConsignmentNo: ocr.consignmentNo });
+    notify('POD attached', 'The dealer can now review and release your balance.');
   };
 
-  const capturePodPhoto = async (shipmentId: string) => {
+  const capturePodPhoto = async (shipmentId: string, expected?: string) => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
@@ -83,19 +88,18 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
       const asset = result.assets?.[0];
       if (result.canceled || !asset) return;
-      attach(shipmentId, {
-        uri: asset.uri,
-        kind: 'photo',
-        fileName: asset.fileName ?? `pod-${Date.now()}.jpg`,
-        uploadedAt: Date.now(),
-      });
+      await attach(
+        shipmentId,
+        { uri: asset.uri, kind: 'photo', fileName: asset.fileName ?? `pod-${Date.now()}.jpg`, uploadedAt: Date.now() },
+        expected,
+      );
     } catch (error) {
       console.warn('[pod] camera capture failed', error);
       notify('Could not open camera', 'Please try again or attach a file instead.');
     }
   };
 
-  const pickPodDocument = async (shipmentId: string) => {
+  const pickPodDocument = async (shipmentId: string, expected?: string) => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf'],
@@ -103,12 +107,11 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       });
       const asset = result.assets?.[0];
       if (result.canceled || !asset) return;
-      attach(shipmentId, {
-        uri: asset.uri,
-        kind: 'document',
-        fileName: asset.name ?? `pod-${Date.now()}.pdf`,
-        uploadedAt: Date.now(),
-      });
+      await attach(
+        shipmentId,
+        { uri: asset.uri, kind: 'document', fileName: asset.name ?? `pod-${Date.now()}.pdf`, uploadedAt: Date.now() },
+        expected,
+      );
     } catch (error) {
       console.warn('[pod] document pick failed', error);
       notify('Could not open files', 'Please try again or use the camera instead.');
@@ -214,14 +217,32 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           )}
 
           {role === 'dealer' && shipment.stage === 'POD_UPLOADED' && (
-            <ActionButton
-              label={t('releaseBalance')}
-              caption={`Releases ${formatINR(balanceInr)} from escrow to the driver`}
-              icon="lock-open"
-              tone="success"
-              busy={isProcessing}
-              onPress={() => void releaseBalance(shipment.id)}
-            />
+            <>
+              {/* Feature 12: OCR verdict the dealer reviews before releasing. */}
+              {shipment.pod && shipment.consignmentNo && (
+                <StatusNote
+                  icon={shipment.pod.verified ? 'shield-checkmark' : 'warning'}
+                  tone={shipment.pod.verified ? 'success' : 'neutral'}
+                  text={
+                    shipment.pod.verified
+                      ? `POD verified — consignment ${shipment.consignmentNo} matches.`
+                      : `POD consignment mismatch: read ${shipment.pod.ocrConsignmentNo ?? 'none'}, expected ${shipment.consignmentNo}. Review before releasing.`
+                  }
+                />
+              )}
+              {shipment.disputeId ? (
+                <StatusNote icon="lock-closed" text="Escrow is frozen by an open dispute — resolve it below to release." />
+              ) : (
+                <ActionButton
+                  label={t('releaseBalance')}
+                  caption={`Releases ${formatINR(balanceInr)} from escrow to the driver`}
+                  icon="lock-open"
+                  tone="success"
+                  busy={isProcessing}
+                  onPress={() => void releaseBalance(shipment.id)}
+                />
+              )}
+            </>
           )}
 
           {role === 'driver' && shipment.stage === 'CREATED' && (
@@ -242,19 +263,24 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
               <Text style={styles.podHint}>
                 Delivered? {t('uploadPod')} to unlock your {formatINR(balanceInr)} balance:
               </Text>
+              {shipment.consignmentNo && (
+                <Text style={styles.podHint}>
+                  Consignment on this load: {shipment.consignmentNo} — we'll read it off your POD.
+                </Text>
+              )}
               <View style={styles.podButtonRow}>
                 <ActionButton
                   label="Camera"
                   icon="camera"
                   compact
-                  onPress={() => void capturePodPhoto(shipment.id)}
+                  onPress={() => void capturePodPhoto(shipment.id, shipment.consignmentNo)}
                 />
                 <ActionButton
                   label="Attach file"
                   icon="document-attach"
                   compact
                   tone="neutral"
-                  onPress={() => void pickPodDocument(shipment.id)}
+                  onPress={() => void pickPodDocument(shipment.id, shipment.consignmentNo)}
                 />
               </View>
             </View>
@@ -300,10 +326,41 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
                   {shipment.pod.fileName}
                 </Text>
                 <Text style={styles.subline}>Uploaded at {formatTime(shipment.pod.uploadedAt)}</Text>
+                {shipment.consignmentNo && (
+                  <View style={styles.podVerifyRow}>
+                    <Ionicons
+                      name={shipment.pod.verified ? 'shield-checkmark' : 'warning'}
+                      size={13}
+                      color={shipment.pod.verified ? colors.success : colors.warning}
+                    />
+                    <Text
+                      style={[
+                        styles.podVerifyText,
+                        { color: shipment.pod.verified ? colors.success : colors.warning },
+                      ]}
+                    >
+                      {shipment.pod.verified
+                        ? `Consignment ${shipment.pod.ocrConsignmentNo} verified`
+                        : `OCR read ${shipment.pod.ocrConsignmentNo ?? 'none'} · expected ${shipment.consignmentNo}`}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
         )}
+
+        {/* Chat + dispute (Features 10 & 13) — available once a trip exists */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Coordination</Text>
+          <ActionButton
+            label={role === 'dealer' ? `Chat with ${shipment.driverName}` : 'Chat with the dealer'}
+            icon="chatbubbles"
+            tone="neutral"
+            onPress={() => setChatOpen(true)}
+          />
+          <DisputePanel shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
+        </View>
 
         {/* Audit timeline */}
         <View style={styles.card}>
@@ -317,6 +374,14 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           ))}
         </View>
       </ScrollView>
+
+      <ChatSheet
+        visible={chatOpen}
+        shipmentId={shipment.id}
+        role={role === 'dealer' ? 'dealer' : 'driver'}
+        counterpartLabel={role === 'dealer' ? shipment.driverName : 'Dealer'}
+        onClose={() => setChatOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -546,6 +611,17 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  podVerifyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  podVerifyText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '700',
+    flex: 1,
   },
   eventRow: {
     flexDirection: 'row',

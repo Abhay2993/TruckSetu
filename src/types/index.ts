@@ -54,6 +54,8 @@ export interface Load {
   status: LoadStatus;
   bids: Bid[];
   postedAt: number;
+  /** Consignment / LR number the POD must match (Feature 12). */
+  consignmentNo?: string;
 }
 
 export interface Bid {
@@ -93,6 +95,10 @@ export interface ProofOfDelivery {
   kind: PodKind;
   fileName: string;
   uploadedAt: number;
+  /** Consignment number read off the POD by OCR (Feature 12). */
+  ocrConsignmentNo?: string | null;
+  /** True when the OCR number matches the load's consignment number. */
+  verified?: boolean;
 }
 
 export interface EscrowEvent {
@@ -117,6 +123,10 @@ export interface EscrowShipment {
   /** Two-way ratings, settable once the shipment is fully settled. */
   ratingByDealer?: number | null;
   ratingByDriver?: number | null;
+  /** Expected consignment number, carried from the load (Feature 12). */
+  consignmentNo?: string;
+  /** Open dispute id — blocks balance release while set (Feature 13). */
+  disputeId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +162,64 @@ export interface FastagTransaction {
   /** Negative = toll debit, positive = top-up credit. */
   amountInr: number;
   at: number;
+}
+
+/** FASTag auto-recharge rule (Feature 14). */
+export interface AutoRechargeRule {
+  enabled: boolean;
+  thresholdInr: number;
+  topUpInr: number;
+}
+
+// ---------------------------------------------------------------------------
+// Chat, notifications, disputes (platform features 10, 11, 13)
+// ---------------------------------------------------------------------------
+
+export type ChatSenderRole = 'dealer' | 'driver';
+
+export interface ChatMessage {
+  id: string;
+  shipmentId: string;
+  senderId: string;
+  senderRole: ChatSenderRole;
+  text: string;
+  at: number;
+}
+
+export type NotificationKind =
+  | 'bid_received'
+  | 'bid_accepted'
+  | 'advance_paid'
+  | 'pod_uploaded'
+  | 'balance_released'
+  | 'dispute_raised'
+  | 'dispute_resolved'
+  | 'message';
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  shipmentId?: string;
+  at: number;
+  read: boolean;
+}
+
+export type DisputeReason = 'damaged_goods' | 'late_delivery' | 'shortage' | 'wrong_pod' | 'other';
+export type DisputeStatus = 'open' | 'under_review' | 'resolved';
+export type DisputeResolution = 'released' | 'refunded' | 'partial' | 'dismissed';
+
+export interface Dispute {
+  id: string;
+  shipmentId: string;
+  raisedByRole: ChatSenderRole;
+  reason: DisputeReason;
+  detail: string;
+  status: DisputeStatus;
+  resolution: DisputeResolution | null;
+  at: number;
+  resolvedAt: number | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { api } from '../services/api';
+import { registerForPush } from '../services/push';
 import { syncFromServer } from '../services/sync';
 import type { AuthUser } from '../types';
 import { useAppStore } from './useAppStore';
@@ -45,6 +46,8 @@ export const useAuthStore = create<AuthState>()(
         }
         // Pull authoritative loads/shipments/wallet now that we have a token.
         void syncFromServer();
+        // Register this device for push so escrow events can reach it.
+        void registerForPush();
       },
 
       signOut: () => {

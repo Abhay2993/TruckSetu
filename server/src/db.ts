@@ -30,6 +30,7 @@ function seed(): DbShape {
         priceInr: 42000,
         advancePercent: 70,
         status: 'open',
+        consignmentNo: 'LR-48213',
         bids: [
           { id: 'bid-1', driverName: 'Gurpreet Singh', truckNumber: 'PB 10 AB 4321', amountInr: 41000, rating: 4.7, kycVerified: true, placedAt: now - 45 * 60 * 1000 },
           { id: 'bid-2', driverName: 'Ramesh Yadav', truckNumber: 'RJ 14 CD 8890', amountInr: 43500, rating: 4.2, kycVerified: false, placedAt: now - 30 * 60 * 1000 },
@@ -115,6 +116,9 @@ function seed(): DbShape {
     fastag: {},
     telemetry: { totalPoints: 0, lastSyncAt: null, lastPoint: null },
     sosAlerts: [],
+    messages: [],
+    notifications: [],
+    disputes: [],
   };
 }
 
@@ -124,6 +128,9 @@ function load(): DbShape {
     const data = JSON.parse(raw) as DbShape;
     // Migrate data files written before newer collections existed.
     data.sosAlerts = data.sosAlerts ?? [];
+    data.messages = data.messages ?? [];
+    data.notifications = data.notifications ?? [];
+    data.disputes = data.disputes ?? [];
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not

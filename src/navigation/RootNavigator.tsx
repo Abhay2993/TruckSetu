@@ -27,6 +27,7 @@ import { DriverRouteScreen } from '../screens/driver/DriverRouteScreen';
 import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
 import { PaymentEscrowDashboard } from '../screens/shared/PaymentEscrowDashboard';
+import { registerForPush } from '../services/push';
 import { syncFromServer } from '../services/sync';
 import { useAppStore } from '../stores/useAppStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -162,6 +163,7 @@ export function RootNavigator(): React.JSX.Element {
   useEffect(() => {
     if (authHydrated && token) {
       void syncFromServer();
+      void registerForPush();
     }
   }, [authHydrated, token]);
 

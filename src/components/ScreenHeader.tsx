@@ -13,6 +13,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { colors, fontSizes, radii, spacing } from '../theme';
 import { confirmAction } from '../utils/dialog';
 import { DynamicHeader } from './DynamicHeader';
+import { NotificationBell } from './NotificationBell';
 
 interface ScreenHeaderProps {
   /** When provided, renders the green/red online pill. */
@@ -55,6 +56,7 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
             </Text>
           </View>
         )}
+        <NotificationBell />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Switch role"

@@ -48,6 +48,8 @@ export const useLoadsStore = create<LoadsState>()(
             status: 'open',
             bids: [],
             postedAt: Date.now(),
+            // Auto-assign a consignment/LR number so POD OCR has a target.
+            consignmentNo: `LR-${Math.floor(10000 + Math.random() * 90000)}`,
           };
         set((s) => ({ loads: [load, ...s.loads] }));
       },
@@ -76,6 +78,8 @@ export const useLoadsStore = create<LoadsState>()(
           advancePercent: load.advancePercent,
           stage: 'CREATED',
           pod: null,
+          consignmentNo: load.consignmentNo,
+          disputeId: null,
           events: [
             {
               stage: 'CREATED',

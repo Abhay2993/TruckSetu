@@ -11,8 +11,19 @@ import cors from 'cors';
 import express from 'express';
 import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyOtp } from './auth';
 import { db, newId, persist } from './db';
+import { notifyUser } from './notify';
 import { buildUpiIntent, executePayout, paymentsMode, verifyWebhookSignature } from './payments';
-import { Bid, EscrowShipment, FastagWallet, FuelPrice, Load, TelemetryPoint } from './types';
+import {
+  Bid,
+  ChatMessage,
+  Dispute,
+  DisputeReason,
+  EscrowShipment,
+  FastagWallet,
+  FuelPrice,
+  Load,
+  TelemetryPoint,
+} from './types';
 
 const app = express();
 app.use(cors());
@@ -53,11 +64,26 @@ function wallet(userId: string): FastagWallet {
         { id: newId('ft'), label: 'Toll — Kherki Daula Plaza', amountInr: -305, at: Date.now() - 5 * 3600 * 1000 },
         { id: newId('ft'), label: 'Toll — Manesar Plaza', amountInr: -190, at: Date.now() - 2 * 3600 * 1000 },
       ],
+      autoRecharge: { enabled: false, thresholdInr: 300, topUpInr: 500 },
     };
     db.fastag[userId] = w;
     persist();
   }
   return w;
+}
+
+/** Apply the auto-recharge rule if the balance fell below the threshold. */
+function applyAutoRecharge(w: FastagWallet): void {
+  const rule = w.autoRecharge;
+  if (!rule?.enabled || w.balanceInr >= rule.thresholdInr) return;
+  const ref = `AUTO${Date.now()}`;
+  w.balanceInr += rule.topUpInr;
+  w.transactions.unshift({
+    id: ref,
+    label: `Auto top-up (balance below ₹${rule.thresholdInr})`,
+    amountInr: rule.topUpInr,
+    at: Date.now(),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +186,12 @@ app.post('/v1/loads', requireAuth, (req, res) => {
     status: 'open',
     bids: [],
     postedAt: Date.now(),
+    // Every load carries a consignment / LR number so POD OCR verification
+    // has something to check against (dealer-supplied or auto-generated).
+    consignmentNo:
+      typeof req.body?.consignmentNo === 'string' && req.body.consignmentNo.trim()
+        ? req.body.consignmentNo.trim()
+        : `LR-${Math.floor(10000 + Math.random() * 90000)}`,
     dealerId: user.id,
   };
   db.loads.unshift(load);
@@ -191,10 +223,19 @@ app.post('/v1/loads/:loadId/bids', requireAuth, (req, res) => {
     amountInr: Math.round(amount),
     rating: 4.0,
     kycVerified: user.kycVerified ?? false,
+    driverId: user.id,
     placedAt: Date.now(),
   };
   load.bids.push(bid);
   persist();
+  if (load.dealerId) {
+    notifyUser({
+      userId: load.dealerId,
+      kind: 'bid_received',
+      title: 'New bid received',
+      body: `${bid.driverName} bid ${bid.amountInr} on ${load.origin} → ${load.destination}.`,
+    });
+  }
   res.status(201).json({ bid, load });
 });
 
@@ -224,7 +265,10 @@ app.post('/v1/loads/:loadId/bids/:bidId/accept', requireAuth, (req, res) => {
     stage: 'CREATED',
     pod: null,
     events: [],
+    consignmentNo: load.consignmentNo,
+    disputeId: null,
     dealerId: user.id,
+    driverId: bid.driverId,
   };
   shipment.events.push({
     stage: 'CREATED',
@@ -233,6 +277,15 @@ app.post('/v1/loads/:loadId/bids/:bidId/accept', requireAuth, (req, res) => {
   });
   db.shipments.unshift(shipment);
   persist();
+  if (bid.driverId) {
+    notifyUser({
+      userId: bid.driverId,
+      kind: 'bid_accepted',
+      title: 'Your bid was accepted!',
+      body: `${load.origin} → ${load.destination} is yours. Awaiting dispatch.`,
+      shipmentId: shipment.id,
+    });
+  }
   res.status(201).json({ load, shipment });
 });
 
@@ -273,6 +326,15 @@ app.post('/v1/shipments/:id/dispatch', requireAuth, async (req, res) => {
   pushEvent(shipment, `Advance paid to fuel card (ref ${referenceId})`);
 
   persist();
+  if (shipment.driverId) {
+    notifyUser({
+      userId: shipment.driverId,
+      kind: 'advance_paid',
+      title: 'Advance paid to your fuel card',
+      body: `${advanceInr} released for ${shipment.origin} → ${shipment.destination}.`,
+      shipmentId: shipment.id,
+    });
+  }
   res.json({ shipment });
 });
 
@@ -286,11 +348,18 @@ app.post('/v1/shipments/:id/pod', requireAuth, (req, res) => {
     res.status(409).json({ error: `Cannot attach POD in stage ${shipment.stage}.` });
     return;
   }
-  const { fileName, kind, uri } = req.body ?? {};
+  const { fileName, kind, uri, ocrConsignmentNo } = req.body ?? {};
   if (typeof fileName !== 'string' || (kind !== 'photo' && kind !== 'document')) {
     res.status(400).json({ error: 'fileName and kind (photo|document) are required.' });
     return;
   }
+
+  // POD OCR verification: the client reads the consignment number off the
+  // POD image and sends it; the server is the authority on whether it
+  // matches what the load promised. Mismatch does NOT block upload — it
+  // flags the shipment so the dealer reviews before releasing.
+  const readNo = typeof ocrConsignmentNo === 'string' ? ocrConsignmentNo.trim() : null;
+  const verified = Boolean(shipment.consignmentNo && readNo && readNo === shipment.consignmentNo);
 
   // Foundation stores POD metadata; the binary stays on-device. Production
   // path: return a presigned S3/GCS URL here, client uploads, then confirm.
@@ -299,10 +368,28 @@ app.post('/v1/shipments/:id/pod', requireAuth, (req, res) => {
     kind,
     fileName,
     uploadedAt: Date.now(),
+    ocrConsignmentNo: readNo,
+    verified,
   };
   shipment.stage = 'POD_UPLOADED';
-  pushEvent(shipment, `POD uploaded (${fileName})`);
+  pushEvent(
+    shipment,
+    verified
+      ? `POD uploaded & verified (consignment ${readNo})`
+      : shipment.consignmentNo
+        ? `POD uploaded — consignment mismatch (read ${readNo ?? 'none'}, expected ${shipment.consignmentNo})`
+        : `POD uploaded (${fileName})`,
+  );
   persist();
+  if (shipment.dealerId) {
+    notifyUser({
+      userId: shipment.dealerId,
+      kind: 'pod_uploaded',
+      title: verified ? 'POD uploaded & verified' : 'POD uploaded — needs review',
+      body: `${shipment.origin} → ${shipment.destination}. ${verified ? 'Consignment matches.' : 'Check the consignment number.'}`,
+      shipmentId: shipment.id,
+    });
+  }
   res.json({ shipment });
 });
 
@@ -317,6 +404,11 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
     res.status(409).json({ error: `Cannot release balance in stage ${shipment.stage}.` });
     return;
   }
+  // A second guarantee: an open dispute freezes the money until resolved.
+  if (shipment.disputeId) {
+    res.status(409).json({ error: 'An open dispute is holding this escrow — resolve it first.' });
+    return;
+  }
   const { balanceInr } = splitAmounts(shipment);
   let referenceId: string;
   try {
@@ -329,6 +421,15 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
   shipment.stage = 'BALANCE_RELEASED';
   pushEvent(shipment, `Balance released from escrow (ref ${referenceId})`);
   persist();
+  if (shipment.driverId) {
+    notifyUser({
+      userId: shipment.driverId,
+      kind: 'balance_released',
+      title: 'Balance released!',
+      body: `${balanceInr} paid for ${shipment.origin} → ${shipment.destination}. Trip settled.`,
+      shipmentId: shipment.id,
+    });
+  }
   res.json({ shipment });
 });
 
@@ -459,6 +560,259 @@ app.post('/v1/fastag/topup', requireAuth, (req, res) => {
   });
   persist();
   res.json({ upiRef, balanceInr: w.balanceInr, transactions: w.transactions });
+});
+
+/**
+ * Simulate a toll debit — the trigger the auto-recharge rule reacts to.
+ * Real deployments debit on the NHAI/bank webhook and then call
+ * applyAutoRecharge; this endpoint lets the app demo the whole loop.
+ */
+app.post('/v1/fastag/toll', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amount = Number(req.body?.amountInr);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: 'amountInr must be a positive toll amount.' });
+    return;
+  }
+  const w = wallet(user.id);
+  w.balanceInr -= Math.round(amount);
+  w.transactions.unshift({
+    id: newId('ft'),
+    label: typeof req.body?.plaza === 'string' ? `Toll — ${req.body.plaza}` : 'Toll plaza',
+    amountInr: -Math.round(amount),
+    at: Date.now(),
+  });
+  const before = w.balanceInr;
+  applyAutoRecharge(w);
+  persist();
+  res.json({
+    balanceInr: w.balanceInr,
+    transactions: w.transactions,
+    autoRecharged: w.balanceInr !== before,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Push token registration + in-app notifications
+// ---------------------------------------------------------------------------
+
+app.put('/v1/push/token', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const token = req.body?.token;
+  user.pushToken = typeof token === 'string' && token.length > 0 ? token : null;
+  persist();
+  res.json({ ok: true });
+});
+
+app.get('/v1/notifications', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const mine = db.notifications.filter((n) => n.userId === user.id).slice(0, 50);
+  res.json({ notifications: mine, unread: mine.filter((n) => !n.read).length });
+});
+
+app.post('/v1/notifications/read', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  for (const n of db.notifications) {
+    if (n.userId === user.id) n.read = true;
+  }
+  persist();
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// In-app chat with number masking. Messages are keyed by shipment; the API
+// never returns the counterpart's phone. "Calls" go through a masked proxy
+// number (production: a telephony bridge like Exotel/Knowlarity/Twilio).
+// ---------------------------------------------------------------------------
+
+function shipmentParty(shipment: EscrowShipment, userId: string): 'dealer' | 'driver' | null {
+  if (shipment.dealerId === userId) return 'dealer';
+  if (shipment.driverId === userId) return 'driver';
+  return null;
+}
+
+app.get('/v1/shipments/:id/messages', requireAuth, (req, res) => {
+  const messages = db.messages
+    .filter((m) => m.shipmentId === req.params.id)
+    .sort((a, b) => a.at - b.at);
+  res.json({ messages });
+});
+
+app.post('/v1/shipments/:id/messages', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  const text = typeof req.body?.text === 'string' ? req.body.text.trim().slice(0, 1000) : '';
+  if (!text) {
+    res.status(400).json({ error: 'Message text is required.' });
+    return;
+  }
+  // Fall back to the acting user's role when the shipment isn't linked to
+  // them (demo/seed data) so chat still works end to end.
+  const role = shipmentParty(shipment, user.id) ?? user.role ?? 'dealer';
+  const message: ChatMessage = {
+    id: newId('msg'),
+    shipmentId: shipment.id,
+    senderId: user.id,
+    senderRole: role,
+    text,
+    at: Date.now(),
+  };
+  db.messages.push(message);
+  persist();
+
+  const counterpartId = role === 'dealer' ? shipment.driverId : shipment.dealerId;
+  if (counterpartId && counterpartId !== user.id) {
+    notifyUser({
+      userId: counterpartId,
+      kind: 'message',
+      title: `New message · ${shipment.origin} → ${shipment.destination}`,
+      body: text.slice(0, 80),
+      shipmentId: shipment.id,
+    });
+  }
+  res.status(201).json({ message });
+});
+
+/** Masked-call proxy: returns a bridge number, never the real one. */
+app.get('/v1/shipments/:id/call', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  // Production: provision a masked number from the telephony provider that
+  // bridges the two parties for this shipment only. Demo: a stable
+  // deterministic proxy so the UI has something real to dial.
+  const suffix = shipment.id.replace(/\D/g, '').slice(-4).padStart(4, '0');
+  res.json({ maskedNumber: `+91 80 4718 ${suffix}`, expiresInMinutes: 30 });
+});
+
+// ---------------------------------------------------------------------------
+// Dispute resolution. An open dispute freezes the escrow (release checks
+// shipment.disputeId). Raise → under_review → resolved with an outcome.
+// ---------------------------------------------------------------------------
+
+const DISPUTE_REASONS: DisputeReason[] = [
+  'damaged_goods',
+  'late_delivery',
+  'shortage',
+  'wrong_pod',
+  'other',
+];
+
+app.get('/v1/disputes', requireAuth, (_req, res) => {
+  res.json({ disputes: db.disputes });
+});
+
+app.post('/v1/shipments/:id/dispute', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  if (shipment.stage === 'BALANCE_RELEASED') {
+    res.status(409).json({ error: 'Shipment already settled — cannot dispute.' });
+    return;
+  }
+  if (shipment.disputeId) {
+    res.status(409).json({ error: 'A dispute is already open on this shipment.' });
+    return;
+  }
+  const reason = req.body?.reason as DisputeReason;
+  if (!DISPUTE_REASONS.includes(reason)) {
+    res.status(400).json({ error: `reason must be one of ${DISPUTE_REASONS.join(', ')}.` });
+    return;
+  }
+  const dispute: Dispute = {
+    id: newId('dsp'),
+    shipmentId: shipment.id,
+    raisedByRole: shipmentParty(shipment, user.id) ?? user.role ?? 'dealer',
+    reason,
+    detail: typeof req.body?.detail === 'string' ? req.body.detail.slice(0, 500) : '',
+    status: 'open',
+    resolution: null,
+    at: Date.now(),
+    resolvedAt: null,
+  };
+  db.disputes.unshift(dispute);
+  shipment.disputeId = dispute.id;
+  pushEvent(shipment, `Dispute raised: ${reason.replace('_', ' ')}`);
+  persist();
+
+  const counterpartId =
+    dispute.raisedByRole === 'dealer' ? shipment.driverId : shipment.dealerId;
+  if (counterpartId && counterpartId !== user.id) {
+    notifyUser({
+      userId: counterpartId,
+      kind: 'dispute_raised',
+      title: 'Dispute raised on your shipment',
+      body: `${shipment.origin} → ${shipment.destination}: ${reason.replace('_', ' ')}. Escrow is on hold.`,
+      shipmentId: shipment.id,
+    });
+  }
+  res.status(201).json({ dispute, shipment });
+});
+
+app.post('/v1/disputes/:id/resolve', requireAuth, (req, res) => {
+  const dispute = db.disputes.find((d) => d.id === req.params.id);
+  if (!dispute) {
+    res.status(404).json({ error: 'Dispute not found.' });
+    return;
+  }
+  const resolution = req.body?.resolution;
+  if (!['released', 'refunded', 'partial', 'dismissed'].includes(resolution)) {
+    res.status(400).json({ error: 'resolution must be released|refunded|partial|dismissed.' });
+    return;
+  }
+  dispute.status = 'resolved';
+  dispute.resolution = resolution;
+  dispute.resolvedAt = Date.now();
+  const shipment = db.shipments.find((s) => s.id === dispute.shipmentId);
+  if (shipment) {
+    shipment.disputeId = null; // unfreeze the escrow
+    pushEvent(shipment, `Dispute resolved: ${resolution}`);
+    for (const uid of [shipment.dealerId, shipment.driverId]) {
+      if (uid) {
+        notifyUser({
+          userId: uid,
+          kind: 'dispute_resolved',
+          title: 'Dispute resolved',
+          body: `${shipment.origin} → ${shipment.destination}: ${resolution}. Escrow unfrozen.`,
+          shipmentId: shipment.id,
+        });
+      }
+    }
+  }
+  persist();
+  res.json({ dispute, shipment });
+});
+
+// ---------------------------------------------------------------------------
+// FASTag auto-recharge rule + rule-aware top-up
+// ---------------------------------------------------------------------------
+
+app.put('/v1/fastag/autorecharge', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const w = wallet(user.id);
+  const enabled = Boolean(req.body?.enabled);
+  const thresholdInr = Number(req.body?.thresholdInr);
+  const topUpInr = Number(req.body?.topUpInr);
+  if (enabled && (!Number.isFinite(thresholdInr) || thresholdInr < 0 || !Number.isFinite(topUpInr) || topUpInr <= 0)) {
+    res.status(400).json({ error: 'thresholdInr (>=0) and topUpInr (>0) are required when enabling.' });
+    return;
+  }
+  w.autoRecharge = {
+    enabled,
+    thresholdInr: Math.round(thresholdInr) || 300,
+    topUpInr: Math.round(topUpInr) || 500,
+  };
+  persist();
+  res.json({ autoRecharge: w.autoRecharge });
 });
 
 // ---------------------------------------------------------------------------

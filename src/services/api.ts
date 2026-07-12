@@ -15,13 +15,19 @@
 
 import { DEMO_OTP, isServerMode } from '../config';
 import type {
-  AuthUser,
+  AppNotification,
+  AutoRechargeRule,
+  ChatMessage,
+  Dispute,
+  DisputeReason,
+  DisputeResolution,
   EscrowShipment,
   FastagTransaction,
   FuelPrice,
   Load,
   ProofOfDelivery,
   TelemetryPoint,
+  AuthUser,
   UserRole,
 } from '../types';
 import { ApiError, request } from './http';
@@ -174,12 +180,20 @@ export const api = {
 
   async uploadPod(shipmentId: string, pod: ProofOfDelivery): Promise<EscrowShipment | null> {
     if (!isServerMode) return null;
-    // Foundation sends POD metadata; the image/PDF bytes stay on-device.
-    // Production: request a presigned upload URL here, PUT the binary, then
-    // confirm — the endpoint shape is already compatible.
+    // Foundation sends POD metadata + the OCR-read consignment number; the
+    // image/PDF bytes stay on-device. Production: request a presigned upload
+    // URL here, PUT the binary, then confirm — shape is already compatible.
     const { shipment } = await request<{ shipment: EscrowShipment }>(
       `/v1/shipments/${shipmentId}/pod`,
-      { method: 'POST', body: { fileName: pod.fileName, kind: pod.kind, uri: pod.uri } },
+      {
+        method: 'POST',
+        body: {
+          fileName: pod.fileName,
+          kind: pod.kind,
+          uri: pod.uri,
+          ocrConsignmentNo: pod.ocrConsignmentNo ?? null,
+        },
+      },
     );
     return shipment;
   },
@@ -214,9 +228,15 @@ export const api = {
   // FASTag wallet (Feature E)
   // -------------------------------------------------------------------------
 
-  async fetchFastag(): Promise<{ balanceInr: number; transactions: FastagTransaction[] } | null> {
+  async fetchFastag(): Promise<{
+    balanceInr: number;
+    transactions: FastagTransaction[];
+    autoRecharge?: AutoRechargeRule;
+  } | null> {
     if (!isServerMode) return null;
-    return request<{ balanceInr: number; transactions: FastagTransaction[] }>('/v1/fastag');
+    return request<{ balanceInr: number; transactions: FastagTransaction[]; autoRecharge?: AutoRechargeRule }>(
+      '/v1/fastag',
+    );
   },
 
   /**
@@ -266,5 +286,102 @@ export const api = {
   async resolveSos(id: string): Promise<void> {
     if (!isServerMode) return;
     await request(`/v1/sos/${id}/resolve`, { method: 'POST' });
+  },
+
+  // -------------------------------------------------------------------------
+  // Push + notifications (Feature 11)
+  // -------------------------------------------------------------------------
+
+  async registerPushToken(token: string): Promise<void> {
+    if (!isServerMode) return;
+    await request('/v1/push/token', { method: 'PUT', body: { token } });
+  },
+
+  async fetchNotifications(): Promise<{ notifications: AppNotification[]; unread: number } | null> {
+    if (!isServerMode) return null;
+    return request<{ notifications: AppNotification[]; unread: number }>('/v1/notifications');
+  },
+
+  async markNotificationsRead(): Promise<void> {
+    if (!isServerMode) return;
+    await request('/v1/notifications/read', { method: 'POST' });
+  },
+
+  // -------------------------------------------------------------------------
+  // In-app chat + masked calls (Feature 10)
+  // -------------------------------------------------------------------------
+
+  async fetchMessages(shipmentId: string): Promise<ChatMessage[] | null> {
+    if (!isServerMode) return null;
+    const { messages } = await request<{ messages: ChatMessage[] }>(
+      `/v1/shipments/${shipmentId}/messages`,
+    );
+    return messages;
+  },
+
+  async sendMessage(shipmentId: string, text: string): Promise<ChatMessage | null> {
+    if (!isServerMode) return null;
+    const { message } = await request<{ message: ChatMessage }>(
+      `/v1/shipments/${shipmentId}/messages`,
+      { method: 'POST', body: { text } },
+    );
+    return message;
+  },
+
+  async getMaskedCall(shipmentId: string): Promise<{ maskedNumber: string } | null> {
+    if (!isServerMode) {
+      await delay(300);
+      // Deterministic demo proxy so the dialer has a number to open.
+      const suffix = shipmentId.replace(/\D/g, '').slice(-4).padStart(4, '0');
+      return { maskedNumber: `+91 80 4718 ${suffix}` };
+    }
+    return request<{ maskedNumber: string }>(`/v1/shipments/${shipmentId}/call`);
+  },
+
+  // -------------------------------------------------------------------------
+  // Disputes (Feature 13)
+  // -------------------------------------------------------------------------
+
+  async raiseDispute(
+    shipmentId: string,
+    reason: DisputeReason,
+    detail: string,
+  ): Promise<{ dispute: Dispute; shipment: EscrowShipment } | null> {
+    if (!isServerMode) return null;
+    return request<{ dispute: Dispute; shipment: EscrowShipment }>(
+      `/v1/shipments/${shipmentId}/dispute`,
+      { method: 'POST', body: { reason, detail } },
+    );
+  },
+
+  async resolveDispute(
+    disputeId: string,
+    resolution: DisputeResolution,
+  ): Promise<{ dispute: Dispute; shipment: EscrowShipment | null } | null> {
+    if (!isServerMode) return null;
+    return request<{ dispute: Dispute; shipment: EscrowShipment | null }>(
+      `/v1/disputes/${disputeId}/resolve`,
+      { method: 'POST', body: { resolution } },
+    );
+  },
+
+  // -------------------------------------------------------------------------
+  // FASTag auto-recharge + toll simulation (Feature 14)
+  // -------------------------------------------------------------------------
+
+  async setAutoRecharge(rule: AutoRechargeRule): Promise<void> {
+    if (!isServerMode) return;
+    await request('/v1/fastag/autorecharge', { method: 'PUT', body: rule });
+  },
+
+  async simulateToll(
+    amountInr: number,
+    plaza: string,
+  ): Promise<{ balanceInr: number; transactions: FastagTransaction[]; autoRecharged: boolean } | null> {
+    if (!isServerMode) return null;
+    return request<{ balanceInr: number; transactions: FastagTransaction[]; autoRecharged: boolean }>(
+      '/v1/fastag/toll',
+      { method: 'POST', body: { amountInr, plaza } },
+    );
   },
 };

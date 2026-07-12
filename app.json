@@ -36,7 +36,8 @@
         {
           "cameraPermission": "TruckSetu uses the camera to capture Proof of Delivery (POD) documents so escrow payments can be released."
         }
-      ]
+      ],
+      "expo-notifications"
     ]
   }
 }

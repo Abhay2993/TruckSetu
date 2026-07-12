@@ -12,6 +12,7 @@ import { isServerMode } from '../config';
 import { useEscrowStore } from '../stores/useEscrowStore';
 import { useFastagStore } from '../stores/useFastagStore';
 import { useLoadsStore } from '../stores/useLoadsStore';
+import { useNotificationsStore } from '../stores/useNotificationsStore';
 import { api } from './api';
 
 export async function syncFromServer(): Promise<void> {
@@ -21,6 +22,7 @@ export async function syncFromServer(): Promise<void> {
     api.fetchLoads().catch(() => null),
     api.fetchShipments().catch(() => null),
     api.fetchFastag().catch(() => null),
+    useNotificationsStore.getState().refresh(),
   ]);
 
   if (loads) useLoadsStore.setState({ loads });
@@ -29,6 +31,7 @@ export async function syncFromServer(): Promise<void> {
     useFastagStore.setState({
       balanceInr: fastag.balanceInr,
       transactions: fastag.transactions,
+      ...(fastag.autoRecharge ? { autoRecharge: fastag.autoRecharge } : {}),
     });
   }
 }
