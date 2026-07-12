@@ -8,6 +8,7 @@
  */
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,8 +33,9 @@ export function RoleSelectScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.flex}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.brand}>
           <DynamicHeader size="display" prefixColor={colors.textInverse} />
           <Text style={styles.tagline}>{t('appTagline')}</Text>
@@ -75,8 +77,9 @@ export function RoleSelectScreen(): React.JSX.Element {
           icon={<Ionicons name="briefcase" size={30} color={colors.accent} />}
           onSelect={chooseRole}
         />
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
@@ -111,9 +114,11 @@ function RoleCard({
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   safe: {
     flex: 1,
-    backgroundColor: colors.primary,
   },
   content: {
     flexGrow: 1,

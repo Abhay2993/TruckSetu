@@ -6,6 +6,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -47,19 +48,24 @@ export function DriverTripsScreen(): React.JSX.Element {
       <ScreenHeader />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Earnings overview */}
-        <View style={styles.totalsCard}>
+        <LinearGradient
+          colors={[colors.primary, colors.primaryDark]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.totalsCard}
+        >
           <View style={styles.totalCol}>
             <Text style={styles.totalValue}>{formatINR(totals.received)}</Text>
             <Text style={styles.totalLabel}>{t('advanceReceived')}</Text>
           </View>
           <View style={styles.totalsDivider} />
           <View style={styles.totalCol}>
-            <Text style={[styles.totalValue, { color: colors.warning }]}>
+            <Text style={[styles.totalValue, { color: colors.accent }]}>
               {formatINR(totals.locked)}
             </Text>
             <Text style={styles.totalLabel}>{t('lockedInEscrow')}</Text>
           </View>
-        </View>
+        </LinearGradient>
 
         <Text style={styles.sectionTitle}>My trips</Text>
 
@@ -111,7 +117,6 @@ const styles = StyleSheet.create({
   },
   totalsCard: {
     flexDirection: 'row',
-    backgroundColor: colors.primary,
     borderRadius: radii.lg,
     padding: spacing.lg,
     ...cardShadow,

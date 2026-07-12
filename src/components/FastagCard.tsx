@@ -5,6 +5,7 @@
  */
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from '../i18n/i18n';
@@ -57,7 +58,12 @@ export function FastagCard(): React.JSX.Element {
   };
 
   return (
-    <View style={styles.card}>
+    <LinearGradient
+      colors={[colors.primary, colors.primaryDark]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.card}
+    >
       <View style={styles.headerRow}>
         <View style={styles.titleRow}>
           <MaterialCommunityIcons name="boom-gate" size={18} color={colors.textInverse} />
@@ -110,13 +116,12 @@ export function FastagCard(): React.JSX.Element {
           </>
         )}
       </Pressable>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.primary,
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.sm,

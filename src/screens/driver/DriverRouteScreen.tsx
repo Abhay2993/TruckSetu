@@ -24,6 +24,7 @@ import { AMENITIES } from '../../data/mock';
 import { useOfflineTelemetry } from '../../hooks/OfflineTelemetryHook';
 import { useTranslation } from '../../i18n/i18n';
 import { useGpsSimulator } from '../../services/gpsSimulator';
+import { useAuthStore } from '../../stores/useAuthStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Amenity } from '../../types';
 import { notify } from '../../utils/dialog';
@@ -56,6 +57,7 @@ function applyFilter(amenities: Amenity[], filter: AmenityFilter): Amenity[] {
 
 export function DriverRouteScreen(): React.JSX.Element {
   const t = useTranslation();
+  const user = useAuthStore((s) => s.user);
   const [filter, setFilter] = useState<AmenityFilter>('all');
 
   // Feature D wiring: every simulated GPS tick flows through recordPoint,
@@ -75,6 +77,20 @@ export function DriverRouteScreen(): React.JSX.Element {
       <ScreenHeader isOnline={telemetry.isOnline} queuedCount={telemetry.queuedCount} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Greeting + active route context */}
+        <View style={styles.greetingRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.greeting}>
+              Namaste{user?.name ? `, ${user.name}` : user?.phone ? `, ${user.phone}` : ''} 🙏
+            </Text>
+            <Text style={styles.greetingSub}>Delhi → Jaipur · NH-48 · on trip</Text>
+          </View>
+          <View style={styles.speedBadge}>
+            <Text style={styles.speedValue}>{currentSpeed}</Text>
+            <Text style={styles.speedUnit}>km/h</Text>
+          </View>
+        </View>
+
         {/* Offline banner — visible reassurance that fixes aren't being lost */}
         {!telemetry.isOnline && (
           <View style={styles.offlineBanner}>
@@ -92,12 +108,21 @@ export function DriverRouteScreen(): React.JSX.Element {
           destinationLabel="Jaipur"
         />
 
-        {/* Telemetry strip: speed, cache depth, sync status */}
+        {/* Telemetry strip: cache depth and sync status */}
         <View style={styles.telemetryStrip}>
-          <TelemetryStat label="Speed" value={`${currentSpeed} km/h`} />
-          <TelemetryStat label="Cached" value={`${telemetry.queuedCount} pts`} highlight={telemetry.queuedCount > 0} />
-          <TelemetryStat label="Synced" value={`${telemetry.totalSyncedCount} pts`} />
           <TelemetryStat
+            icon="hardware-chip-outline"
+            label="Cached"
+            value={`${telemetry.queuedCount} pts`}
+            highlight={telemetry.queuedCount > 0}
+          />
+          <TelemetryStat
+            icon="cloud-done-outline"
+            label="Synced"
+            value={`${telemetry.totalSyncedCount} pts`}
+          />
+          <TelemetryStat
+            icon="time-outline"
             label="Last sync"
             value={
               telemetry.isSyncing
@@ -148,16 +173,20 @@ export function DriverRouteScreen(): React.JSX.Element {
 }
 
 function TelemetryStat({
+  icon,
   label,
   value,
   highlight = false,
 }: {
+  icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value: string;
   highlight?: boolean;
 }): React.JSX.Element {
+  const tint = highlight ? colors.warning : colors.textMuted;
   return (
     <View style={styles.stat}>
+      <Ionicons name={icon} size={15} color={tint} />
       <Text style={[styles.statValue, highlight && { color: colors.warning }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -173,6 +202,39 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.md,
     paddingBottom: spacing.xxl,
+  },
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  greeting: {
+    fontSize: fontSizes.lg,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  greetingSub: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  speedBadge: {
+    alignItems: 'center',
+    backgroundColor: colors.accentSoft,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  speedValue: {
+    fontSize: fontSizes.lg,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  speedUnit: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent,
+    opacity: 0.8,
   },
   offlineBanner: {
     flexDirection: 'row',

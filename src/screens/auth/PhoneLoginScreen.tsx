@@ -9,6 +9,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -80,8 +81,9 @@ export function PhoneLoginScreen(): React.JSX.Element {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <KeyboardAvoidingView
+    <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.flex}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
       >
@@ -158,9 +160,10 @@ export function PhoneLoginScreen(): React.JSX.Element {
               </View>
             )}
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
@@ -201,7 +204,6 @@ function PrimaryButton({
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: colors.primary,
   },
   flex: { flex: 1 },
   content: {
