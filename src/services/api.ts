@@ -18,6 +18,7 @@ import type {
   AuthUser,
   EscrowShipment,
   FastagTransaction,
+  FuelPrice,
   Load,
   ProofOfDelivery,
   TelemetryPoint,
@@ -140,6 +141,15 @@ export const api = {
     );
   },
 
+  /** Driver-side: bid on a load (the backhaul finder's action). */
+  async placeBid(
+    loadId: string,
+    input: { amountInr: number; truckNumber: string },
+  ): Promise<{ load: Load } | null> {
+    if (!isServerMode) return null;
+    return request<{ load: Load }>(`/v1/loads/${loadId}/bids`, { method: 'POST', body: input });
+  },
+
   // -------------------------------------------------------------------------
   // Escrow lifecycle (Feature C) — server returns the authoritative shipment
   // -------------------------------------------------------------------------
@@ -216,5 +226,31 @@ export const api = {
     }
     await delay(SIMULATED_LATENCY_MS);
     return { upiRef: `UPI${Date.now()}${Math.round(amountInr)}` };
+  },
+
+  // -------------------------------------------------------------------------
+  // Driver features: fuel prices & SOS
+  // -------------------------------------------------------------------------
+
+  async fetchFuelPrices(): Promise<FuelPrice[] | null> {
+    if (!isServerMode) return null;
+    const { prices } = await request<{ prices: FuelPrice[] }>('/v1/fuel/prices');
+    return prices;
+  },
+
+  async sendSos(point: TelemetryPoint | null): Promise<{ id: string }> {
+    if (isServerMode) {
+      return request<{ id: string }>('/v1/sos', {
+        method: 'POST',
+        body: { latitude: point?.latitude, longitude: point?.longitude },
+      });
+    }
+    await delay(400);
+    return { id: `sos-${Date.now()}` };
+  },
+
+  async resolveSos(id: string): Promise<void> {
+    if (!isServerMode) return;
+    await request(`/v1/sos/${id}/resolve`, { method: 'POST' });
   },
 };

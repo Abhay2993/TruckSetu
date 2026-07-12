@@ -50,6 +50,32 @@ function seed(): DbShape {
         ],
         postedAt: now - 30 * 60 * 1000,
       },
+      // Backhaul seeds: loads out of Jaipur so a Delhi→Jaipur driver finds a
+      // paying trip home (the return-load finder feature).
+      {
+        id: 'load-3',
+        origin: 'Jaipur',
+        destination: 'Delhi',
+        material: 'Marble slabs',
+        weightTonnes: 16,
+        priceInr: 38000,
+        advancePercent: 70,
+        status: 'open',
+        bids: [],
+        postedAt: now - 55 * 60 * 1000,
+      },
+      {
+        id: 'load-4',
+        origin: 'Jaipur',
+        destination: 'Gurugram',
+        material: 'Handicraft cartons',
+        weightTonnes: 6,
+        priceInr: 22000,
+        advancePercent: 60,
+        status: 'open',
+        bids: [],
+        postedAt: now - 15 * 60 * 1000,
+      },
     ],
     shipments: [
       {
@@ -68,13 +94,17 @@ function seed(): DbShape {
     ],
     fastag: {},
     telemetry: { totalPoints: 0, lastSyncAt: null, lastPoint: null },
+    sosAlerts: [],
   };
 }
 
 function load(): DbShape {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw) as DbShape;
+    const data = JSON.parse(raw) as DbShape;
+    // Migrate data files written before newer collections existed.
+    data.sosAlerts = data.sosAlerts ?? [];
+    return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not
     // silently overwritten until the first write actually happens.

@@ -18,12 +18,16 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AmenityCard } from '../../components/AmenityCard';
 import { FastagCard } from '../../components/FastagCard';
+import { FuelPriceCard } from '../../components/FuelPriceCard';
 import { RouteMap } from '../../components/RouteMap';
 import { ScreenHeader } from '../../components/ScreenHeader';
+import { SosButton } from '../../components/SosButton';
 import { AMENITIES } from '../../data/mock';
 import { useOfflineTelemetry } from '../../hooks/OfflineTelemetryHook';
 import { useTranslation } from '../../i18n/i18n';
 import { useGpsSimulator } from '../../services/gpsSimulator';
+import { fillTemplate, speak } from '../../services/voice';
+import { useAppStore } from '../../stores/useAppStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Amenity } from '../../types';
@@ -58,6 +62,7 @@ function applyFilter(amenities: Amenity[], filter: AmenityFilter): Amenity[] {
 export function DriverRouteScreen(): React.JSX.Element {
   const t = useTranslation();
   const user = useAuthStore((s) => s.user);
+  const locale = useAppStore((s) => s.locale);
   const [filter, setFilter] = useState<AmenityFilter>('all');
 
   // Feature D wiring: every simulated GPS tick flows through recordPoint,
@@ -70,6 +75,21 @@ export function DriverRouteScreen(): React.JSX.Element {
   const handleNavigate = (amenity: Amenity) => {
     // Placeholder until deep-linking into Google Maps navigation lands.
     notify('Start navigation', `Routing you to ${amenity.name} (${amenity.distanceKm} km ahead).`);
+  };
+
+  // Vernacular voice: announce the amenity results in the user's language
+  // (expo-speech TTS — works in Expo Go; STT slot documented in voice.ts).
+  const speakResults = () => {
+    const nearest = [...filtered].sort((a, b) => a.distanceKm - b.distanceKm)[0];
+    if (!nearest) return;
+    speak(
+      fillTemplate(t('voiceAmenitySummary'), {
+        count: filtered.length,
+        name: nearest.name,
+        km: nearest.distanceKm,
+      }),
+      locale,
+    );
   };
 
   return (
@@ -90,6 +110,9 @@ export function DriverRouteScreen(): React.JSX.Element {
             <Text style={styles.speedUnit}>km/h</Text>
           </View>
         </View>
+
+        {/* SOS: button when idle, red status banner while an alert is live */}
+        <SosButton lastPoint={lastPoint} />
 
         {/* Offline banner — visible reassurance that fixes aren't being lost */}
         {!telemetry.isOnline && (
@@ -137,9 +160,21 @@ export function DriverRouteScreen(): React.JSX.Element {
         {/* FASTag wallet */}
         <FastagCard />
 
+        {/* Diesel prices + fuel credit */}
+        <FuelPriceCard />
+
         {/* Amenities */}
         <View style={styles.amenityHeader}>
           <Text style={styles.sectionTitle}>{t('findDhaba')} & services</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Speak results"
+            onPress={speakResults}
+            hitSlop={8}
+            style={({ pressed }) => [styles.speakBtn, pressed && { opacity: 0.7 }]}
+          >
+            <Ionicons name="volume-high" size={18} color={colors.accent} />
+          </Pressable>
         </View>
         <View style={styles.filterRow}>
           {FILTERS.map(({ key, label }) => {
@@ -273,11 +308,22 @@ const styles = StyleSheet.create({
   },
   amenityHeader: {
     marginTop: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   sectionTitle: {
     fontSize: fontSizes.lg,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  speakBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.sm,
+    backgroundColor: colors.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterRow: {
     flexDirection: 'row',

@@ -40,6 +40,12 @@ export interface TranslationKeys {
   verifyOtp: string;
   changeNumber: string;
   signOut: string;
+  /** Driver features: */
+  returnLoads: string;
+  documentsTitle: string;
+  fuelPricesTitle: string;
+  placeBid: string;
+  voiceAmenitySummary: string;
 }
 
 export const SUPPORTED_LOCALES: { code: Locale; label: string }[] = [
@@ -73,6 +79,11 @@ const translations: Record<Locale, TranslationKeys> = {
     verifyOtp: 'Verify & Continue',
     changeNumber: 'Change number',
     signOut: 'Sign out',
+    returnLoads: 'Return Loads',
+    documentsTitle: 'My Documents',
+    fuelPricesTitle: 'Diesel Prices',
+    placeBid: 'Place Bid',
+    voiceAmenitySummary: '{count} stops ahead on your route. Nearest is {name}, {km} kilometres away.',
   },
   hi: {
     appTagline: 'लोड और ट्रक के बीच भरोसे का सेतु',
@@ -96,6 +107,11 @@ const translations: Record<Locale, TranslationKeys> = {
     verifyOtp: 'सत्यापित करें और आगे बढ़ें',
     changeNumber: 'नंबर बदलें',
     signOut: 'साइन आउट',
+    returnLoads: 'वापसी के लोड',
+    documentsTitle: 'मेरे दस्तावेज़',
+    fuelPricesTitle: 'डीज़ल के दाम',
+    placeBid: 'बोली लगाएं',
+    voiceAmenitySummary: 'आपके रास्ते में {count} ठिकाने हैं। सबसे नज़दीक {name}, {km} किलोमीटर दूर।',
   },
   pa: {
     appTagline: 'ਲੋਡ ਅਤੇ ਟਰੱਕ ਵਿਚਕਾਰ ਭਰੋਸੇ ਦਾ ਪੁਲ',
@@ -119,6 +135,11 @@ const translations: Record<Locale, TranslationKeys> = {
     verifyOtp: 'ਤਸਦੀਕ ਕਰੋ ਤੇ ਅੱਗੇ ਵਧੋ',
     changeNumber: 'ਨੰਬਰ ਬਦਲੋ',
     signOut: 'ਸਾਈਨ ਆਊਟ',
+    returnLoads: 'ਵਾਪਸੀ ਦੇ ਲੋਡ',
+    documentsTitle: 'ਮੇਰੇ ਦਸਤਾਵੇਜ਼',
+    fuelPricesTitle: 'ਡੀਜ਼ਲ ਦੇ ਭਾਅ',
+    placeBid: 'ਬੋਲੀ ਲਗਾਓ',
+    voiceAmenitySummary: 'ਤੁਹਾਡੇ ਰਾਹ ਵਿੱਚ {count} ਟਿਕਾਣੇ ਹਨ। ਸਭ ਤੋਂ ਨੇੜੇ {name}, {km} ਕਿਲੋਮੀਟਰ ਦੂਰ।',
   },
   te: {
     appTagline: 'లోడ్లు మరియు ట్రక్కుల మధ్య నమ్మకమైన వంతెన',
@@ -142,6 +163,11 @@ const translations: Record<Locale, TranslationKeys> = {
     verifyOtp: 'ధృవీకరించి కొనసాగండి',
     changeNumber: 'నంబర్ మార్చండి',
     signOut: 'సైన్ అవుట్',
+    returnLoads: 'తిరుగు లోడ్లు',
+    documentsTitle: 'నా పత్రాలు',
+    fuelPricesTitle: 'డీజిల్ ధరలు',
+    placeBid: 'బిడ్ వేయండి',
+    voiceAmenitySummary: 'మీ దారిలో {count} స్థలాలు ఉన్నాయి. అతి దగ్గరగా {name}, {km} కిలోమీటర్ల దూరంలో.',
   },
   ta: {
     appTagline: 'லோடுகளுக்கும் லாரிகளுக்கும் இடையிலான நம்பிக்கை பாலம்',
@@ -165,6 +191,11 @@ const translations: Record<Locale, TranslationKeys> = {
     verifyOtp: 'சரிபார்த்து தொடரவும்',
     changeNumber: 'எண்ணை மாற்றவும்',
     signOut: 'வெளியேறு',
+    returnLoads: 'திரும்பும் லோடுகள்',
+    documentsTitle: 'என் ஆவணங்கள்',
+    fuelPricesTitle: 'டீசல் விலைகள்',
+    placeBid: 'ஏலம் விடவும்',
+    voiceAmenitySummary: 'உங்கள் வழியில் {count} இடங்கள் உள்ளன. அருகில் {name}, {km} கிலோமீட்டர் தொலைவில்.',
   },
 };
 

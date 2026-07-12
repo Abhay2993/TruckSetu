@@ -20,6 +20,8 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { PhoneLoginScreen } from '../screens/auth/PhoneLoginScreen';
 import { DealerLoadsScreen } from '../screens/dealer/DealerLoadsScreen';
 import { DealerShipmentsScreen } from '../screens/dealer/DealerShipmentsScreen';
+import { DocumentsScreen } from '../screens/driver/DocumentsScreen';
+import { DriverLoadsScreen } from '../screens/driver/DriverLoadsScreen';
 import { DriverRouteScreen } from '../screens/driver/DriverRouteScreen';
 import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
@@ -31,7 +33,9 @@ import { colors } from '../theme';
 
 export type DriverTabParamList = {
   Route: undefined;
+  Loads: undefined;
   Trips: undefined;
+  Docs: undefined;
   Payments: undefined;
 };
 
@@ -69,11 +73,29 @@ function DriverTabs(): React.JSX.Element {
         }}
       />
       <DriverTab.Screen
+        name="Loads"
+        component={DriverLoadsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="package-variant" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
         name="Trips"
         component={DriverTripsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="truck-fast" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
+        name="Docs"
+        component={DocumentsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="folder-open" size={size} color={color} />
           ),
         }}
       />

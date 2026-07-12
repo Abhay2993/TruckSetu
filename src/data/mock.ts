@@ -3,7 +3,7 @@
  * deletable once the backend is wired in.
  */
 
-import type { Amenity, Bid, EscrowShipment, Load } from '../types';
+import type { Amenity, Bid, EscrowShipment, FuelPrice, Load } from '../types';
 
 /**
  * The simulated NH-48 style corridor drawn on the map canvas.
@@ -145,6 +145,41 @@ export const SEED_LOADS: Load[] = [
     bids: [bid('bid-3', 'Suresh Patil', 'MH 04 EF 2210', 30500, 4.5)],
     postedAt: Date.now() - 1000 * 60 * 30,
   },
+  // Backhaul seeds: loads out of Jaipur so the return-load finder has
+  // matches for a Delhi→Jaipur trip in demo mode.
+  {
+    id: 'load-3',
+    origin: 'Jaipur',
+    destination: 'Delhi',
+    material: 'Marble slabs',
+    weightTonnes: 16,
+    priceInr: 38000,
+    advancePercent: 70,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now() - 1000 * 60 * 55,
+  },
+  {
+    id: 'load-4',
+    origin: 'Jaipur',
+    destination: 'Gurugram',
+    material: 'Handicraft cartons',
+    weightTonnes: 6,
+    priceInr: 22000,
+    advancePercent: 60,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now() - 1000 * 60 * 15,
+  },
+];
+
+/** Demo-mode diesel prices along the NH-48 corridor. */
+export const FUEL_PRICES: FuelPrice[] = [
+  { city: 'Delhi', state: 'Delhi', dieselInrPerLitre: 87.62, updatedAt: Date.now() },
+  { city: 'Gurugram', state: 'Haryana', dieselInrPerLitre: 90.05, updatedAt: Date.now() },
+  { city: 'Behror', state: 'Rajasthan', dieselInrPerLitre: 89.32, updatedAt: Date.now() },
+  { city: 'Kotputli', state: 'Rajasthan', dieselInrPerLitre: 89.51, updatedAt: Date.now() },
+  { city: 'Jaipur', state: 'Rajasthan', dieselInrPerLitre: 89.94, updatedAt: Date.now() },
 ];
 
 /**

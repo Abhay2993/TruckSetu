@@ -148,3 +148,25 @@ export interface FastagTransaction {
   amountInr: number;
   at: number;
 }
+
+// ---------------------------------------------------------------------------
+// Driver features: fuel prices, document locker, SOS
+// ---------------------------------------------------------------------------
+
+export interface FuelPrice {
+  city: string;
+  state: string;
+  dieselInrPerLitre: number;
+  updatedAt: number;
+}
+
+export type DocumentKind = 'rc' | 'dl' | 'insurance' | 'permit' | 'puc';
+
+export interface DriverDocument {
+  kind: DocumentKind;
+  fileName: string;
+  uri: string;
+  /** ISO date (YYYY-MM-DD); null when the doc has no expiry set yet. */
+  expiresOn: string | null;
+  addedAt: number;
+}

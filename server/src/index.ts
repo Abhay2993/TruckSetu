@@ -12,7 +12,7 @@ import express from 'express';
 import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyOtp } from './auth';
 import { db, newId, persist } from './db';
 import { buildUpiIntent, executePayout, paymentsMode, verifyWebhookSignature } from './payments';
-import { Bid, EscrowShipment, FastagWallet, Load, TelemetryPoint } from './types';
+import { Bid, EscrowShipment, FastagWallet, FuelPrice, Load, TelemetryPoint } from './types';
 
 const app = express();
 app.use(cors());
@@ -419,6 +419,66 @@ app.post('/v1/fastag/topup', requireAuth, (req, res) => {
   });
   persist();
   res.json({ upiRef, balanceInr: w.balanceInr, transactions: w.transactions });
+});
+
+// ---------------------------------------------------------------------------
+// Fuel prices (driver feature). Reference data served from code — swap the
+// constant for a fuel-price API (e.g. a state-wise scraper or data vendor)
+// without touching the route.
+// ---------------------------------------------------------------------------
+
+const FUEL_PRICES: FuelPrice[] = [
+  { city: 'Delhi', state: 'Delhi', dieselInrPerLitre: 87.62, updatedAt: Date.now() },
+  { city: 'Gurugram', state: 'Haryana', dieselInrPerLitre: 90.05, updatedAt: Date.now() },
+  { city: 'Behror', state: 'Rajasthan', dieselInrPerLitre: 89.32, updatedAt: Date.now() },
+  { city: 'Kotputli', state: 'Rajasthan', dieselInrPerLitre: 89.51, updatedAt: Date.now() },
+  { city: 'Jaipur', state: 'Rajasthan', dieselInrPerLitre: 89.94, updatedAt: Date.now() },
+];
+
+app.get('/v1/fuel/prices', requireAuth, (_req, res) => {
+  res.json({ prices: FUEL_PRICES });
+});
+
+// ---------------------------------------------------------------------------
+// SOS alerts (driver feature). POST creates an alert with the last known
+// position; production fan-out (dealer push notification, ops dashboard,
+// SMS to the emergency contact) hangs off this record.
+// ---------------------------------------------------------------------------
+
+app.post('/v1/sos', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const lat = Number(req.body?.latitude);
+  const lng = Number(req.body?.longitude);
+  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 200) : null;
+  const alert = {
+    id: newId('sos'),
+    userId: user.id,
+    phone: user.phone,
+    latitude: Number.isFinite(lat) ? lat : null,
+    longitude: Number.isFinite(lng) ? lng : null,
+    note,
+    at: Date.now(),
+    resolvedAt: null,
+  };
+  db.sosAlerts.unshift(alert);
+  persist();
+  console.warn(`[SOS] ${user.phone} at ${alert.latitude},${alert.longitude} (${alert.id})`);
+  res.status(201).json({ id: alert.id, at: alert.at });
+});
+
+app.post('/v1/sos/:id/resolve', requireAuth, (req, res) => {
+  const alert = db.sosAlerts.find((a) => a.id === req.params.id);
+  if (!alert) {
+    res.status(404).json({ error: 'Alert not found.' });
+    return;
+  }
+  alert.resolvedAt = alert.resolvedAt ?? Date.now();
+  persist();
+  res.json({ ok: true });
+});
+
+app.get('/v1/sos', requireAuth, (_req, res) => {
+  res.json({ alerts: db.sosAlerts.filter((a) => a.resolvedAt === null) });
 });
 
 // ---------------------------------------------------------------------------

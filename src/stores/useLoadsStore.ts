@@ -28,6 +28,8 @@ interface LoadsState {
   postLoad: (input: PostLoadInput) => Promise<void>;
   /** Throws ApiError in server mode when the backend rejects the accept. */
   acceptBid: (loadId: string, bidId: string) => Promise<void>;
+  /** Driver-side: bid on an open load (backhaul finder). */
+  placeBid: (loadId: string, amountInr: number, truckNumber: string) => Promise<void>;
 }
 
 export const useLoadsStore = create<LoadsState>()(
@@ -85,6 +87,39 @@ export const useLoadsStore = create<LoadsState>()(
 
         set((s) => ({
           loads: s.loads.map((l) => (l.id === loadId ? { ...l, status: 'booked' as const } : l)),
+        }));
+      },
+
+      placeBid: async (loadId, amountInr, truckNumber) => {
+        const load = get().loads.find((l) => l.id === loadId);
+        if (!load || load.status !== 'open') return;
+
+        const remote = await api.placeBid(loadId, { amountInr, truckNumber });
+        if (remote) {
+          set((s) => ({ loads: s.loads.map((l) => (l.id === loadId ? remote.load : l)) }));
+          return;
+        }
+
+        // Demo mode: append the bid locally so the driver sees it land.
+        set((s) => ({
+          loads: s.loads.map((l) =>
+            l.id === loadId
+              ? {
+                  ...l,
+                  bids: [
+                    ...l.bids,
+                    {
+                      id: `bid-${Date.now()}`,
+                      driverName: 'You',
+                      truckNumber,
+                      amountInr: Math.round(amountInr),
+                      rating: 4.0,
+                      placedAt: Date.now(),
+                    },
+                  ],
+                }
+              : l,
+          ),
         }));
       },
     }),

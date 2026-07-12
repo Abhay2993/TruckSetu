@@ -101,6 +101,24 @@ export interface TelemetryStats {
   lastPoint: TelemetryPoint | null;
 }
 
+export interface SosAlert {
+  id: string;
+  userId: string;
+  phone: string;
+  latitude: number | null;
+  longitude: number | null;
+  note: string | null;
+  at: number;
+  resolvedAt: number | null;
+}
+
+export interface FuelPrice {
+  city: string;
+  state: string;
+  dieselInrPerLitre: number;
+  updatedAt: number;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -108,4 +126,5 @@ export interface DbShape {
   /** Keyed by user id. */
   fastag: Record<string, FastagWallet>;
   telemetry: TelemetryStats;
+  sosAlerts: SosAlert[];
 }
