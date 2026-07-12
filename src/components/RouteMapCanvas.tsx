@@ -19,11 +19,14 @@ import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { ROUTE_PATH } from '../data/mock';
 import { colors, fontSizes, radii } from '../theme';
 import type { Amenity } from '../types';
+import type { FleetTruck } from './RouteMap.types';
 
 interface RouteMapCanvasProps {
   amenities: Amenity[];
   /** 0..1 progress of the truck along the route. */
   truckProgress: number;
+  /** Fleet mode: one marker per truck instead of the single marker. */
+  fleet?: FleetTruck[];
   originLabel: string;
   destinationLabel: string;
   height?: number;
@@ -80,6 +83,7 @@ function pointAlongPath(path: XY[], t: number): XY {
 export function RouteMapCanvas({
   amenities,
   truckProgress,
+  fleet,
   originLabel,
   destinationLabel,
   height = 230,
@@ -150,14 +154,23 @@ export function RouteMapCanvas({
           </View>
         ))}
 
-      {/* Truck marker */}
-      {ready && (
-        <View style={[styles.truck, toPx(truckPos)]}>
-          <View style={styles.truckBubble}>
-            <MaterialCommunityIcons name="truck" size={14} color={colors.textInverse} />
-          </View>
-        </View>
-      )}
+      {/* Truck marker(s): fleet mode renders one per truck with a label */}
+      {ready && fleet
+        ? fleet.map((truck) => (
+            <View key={truck.id} style={[styles.truck, toPx(pointAlongPath(ROUTE_PATH, truck.progress))]}>
+              <View style={styles.truckBubble}>
+                <MaterialCommunityIcons name="truck" size={14} color={colors.textInverse} />
+              </View>
+              <Text style={styles.truckLabel}>{truck.label}</Text>
+            </View>
+          ))
+        : ready && (
+            <View style={[styles.truck, toPx(truckPos)]}>
+              <View style={styles.truckBubble}>
+                <MaterialCommunityIcons name="truck" size={14} color={colors.textInverse} />
+              </View>
+            </View>
+          )}
     </View>
   );
 }
@@ -231,6 +244,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     marginLeft: -14,
     marginTop: -14,
+    alignItems: 'center',
+  },
+  truckLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    paddingHorizontal: 4,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 2,
   },
   truckBubble: {
     width: 28,

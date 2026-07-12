@@ -113,8 +113,15 @@ export const AMENITIES: Amenity[] = [
   },
 ];
 
-function bid(id: string, driverName: string, truckNumber: string, amountInr: number, rating: number): Bid {
-  return { id, driverName, truckNumber, amountInr, rating, placedAt: Date.now() - 1000 * 60 * 45 };
+function bid(
+  id: string,
+  driverName: string,
+  truckNumber: string,
+  amountInr: number,
+  rating: number,
+  kycVerified = false,
+): Bid {
+  return { id, driverName, truckNumber, amountInr, rating, kycVerified, placedAt: Date.now() - 1000 * 60 * 45 };
 }
 
 export const SEED_LOADS: Load[] = [
@@ -128,8 +135,8 @@ export const SEED_LOADS: Load[] = [
     advancePercent: 70,
     status: 'open',
     bids: [
-      bid('bid-1', 'Gurpreet Singh', 'PB 10 AB 4321', 41000, 4.7),
-      bid('bid-2', 'Ramesh Yadav', 'RJ 14 CD 8890', 43500, 4.2),
+      bid('bid-1', 'Gurpreet Singh', 'PB 10 AB 4321', 41000, 4.7, true),
+      bid('bid-2', 'Ramesh Yadav', 'RJ 14 CD 8890', 43500, 4.2, false),
     ],
     postedAt: Date.now() - 1000 * 60 * 90,
   },
@@ -142,7 +149,7 @@ export const SEED_LOADS: Load[] = [
     priceInr: 31000,
     advancePercent: 60,
     status: 'open',
-    bids: [bid('bid-3', 'Suresh Patil', 'MH 04 EF 2210', 30500, 4.5)],
+    bids: [bid('bid-3', 'Suresh Patil', 'MH 04 EF 2210', 30500, 4.5, true)],
     postedAt: Date.now() - 1000 * 60 * 30,
   },
   // Backhaul seeds: loads out of Jaipur so the return-load finder has
@@ -181,6 +188,31 @@ export const FUEL_PRICES: FuelPrice[] = [
   { city: 'Kotputli', state: 'Rajasthan', dieselInrPerLitre: 89.51, updatedAt: Date.now() },
   { city: 'Jaipur', state: 'Rajasthan', dieselInrPerLitre: 89.94, updatedAt: Date.now() },
 ];
+
+/**
+ * One settled shipment from last week — feeds the GST ledger, lane-rate
+ * analytics and the two-way rating flow with real-looking history.
+ */
+export const SEED_SETTLED_SHIPMENT: EscrowShipment = {
+  id: 'shp-0',
+  loadId: 'load-x0',
+  origin: 'Delhi',
+  destination: 'Jaipur',
+  driverName: 'Ramesh Yadav',
+  truckNumber: 'RJ 14 CD 8890',
+  totalAmountInr: 40000,
+  advancePercent: 70,
+  stage: 'BALANCE_RELEASED',
+  pod: { uri: '', kind: 'document', fileName: 'pod-shp-0.pdf', uploadedAt: Date.now() - 5 * 24 * 3600 * 1000 },
+  events: [
+    { stage: 'CREATED', label: 'Load booked — escrow shipment created', at: Date.now() - 6 * 24 * 3600 * 1000 },
+    { stage: 'ADVANCE_PAID', label: 'Advance paid to fuel card (ref ADV-shp-0-28000)', at: Date.now() - 6 * 24 * 3600 * 1000 },
+    { stage: 'POD_UPLOADED', label: 'POD uploaded (pod-shp-0.pdf)', at: Date.now() - 5 * 24 * 3600 * 1000 },
+    { stage: 'BALANCE_RELEASED', label: 'Balance released from escrow (ref BAL-shp-0-12000)', at: Date.now() - 5 * 24 * 3600 * 1000 },
+  ],
+  ratingByDealer: null,
+  ratingByDriver: null,
+};
 
 /**
  * One shipment already mid-lifecycle so the escrow dashboard demos the

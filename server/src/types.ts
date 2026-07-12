@@ -11,6 +11,8 @@ export interface User {
   phone: string;
   name: string | null;
   role: UserRole | null;
+  /** Set by the KYC provider callback (dev mode: /v1/kyc/verify). */
+  kycVerified?: boolean;
   createdAt: number;
 }
 
@@ -29,6 +31,7 @@ export interface Bid {
   truckNumber: string;
   amountInr: number;
   rating: number;
+  kycVerified?: boolean;
   placedAt: number;
 }
 
@@ -79,6 +82,8 @@ export interface EscrowShipment {
   stage: EscrowStage;
   pod: ProofOfDelivery | null;
   events: EscrowEvent[];
+  ratingByDealer?: number | null;
+  ratingByDriver?: number | null;
   dealerId?: string;
   driverId?: string;
 }

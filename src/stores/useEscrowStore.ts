@@ -18,7 +18,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { SEED_SHIPMENT } from '../data/mock';
+import { SEED_SETTLED_SHIPMENT, SEED_SHIPMENT } from '../data/mock';
 import { api } from '../services/api';
 import type { EscrowShipment, EscrowStage, ProofOfDelivery } from '../types';
 
@@ -30,6 +30,8 @@ interface EscrowState {
   confirmDispatch: (shipmentId: string) => Promise<void>;
   attachPod: (shipmentId: string, pod: ProofOfDelivery) => Promise<void>;
   releaseBalance: (shipmentId: string) => Promise<void>;
+  /** Two-way rating, legal only after settlement. */
+  rateShipment: (shipmentId: string, stars: number, as: 'dealer' | 'driver') => Promise<void>;
 }
 
 /** Split helper used by both the store and the dashboard UI. */
@@ -58,7 +60,7 @@ function transition(
 export const useEscrowStore = create<EscrowState>()(
   persist(
     (set, get) => ({
-      shipments: [SEED_SHIPMENT],
+      shipments: [SEED_SHIPMENT, SEED_SETTLED_SHIPMENT],
       processingIds: [],
 
       addShipment: (shipment) => set((s) => ({ shipments: [shipment, ...s.shipments] })),
@@ -185,6 +187,32 @@ export const useEscrowStore = create<EscrowState>()(
           }));
         } finally {
           set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
+        }
+      },
+
+      rateShipment: async (shipmentId, stars, as) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        const clamped = Math.round(Math.min(5, Math.max(1, stars)));
+        if (!shipment || shipment.stage !== 'BALANCE_RELEASED') return;
+
+        // Optimistic — a star tap must feel instant.
+        const field = as === 'dealer' ? 'ratingByDealer' : 'ratingByDriver';
+        set((s) => ({
+          shipments: s.shipments.map((sh) =>
+            sh.id === shipmentId ? { ...sh, [field]: clamped } : sh,
+          ),
+        }));
+        try {
+          const remote = await api.rateShipment(shipmentId, clamped, as);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+          }
+        } catch (error) {
+          console.warn('[escrow] rating sync failed', error);
         }
       },
     }),

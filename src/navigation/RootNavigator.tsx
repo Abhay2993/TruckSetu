@@ -18,6 +18,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { PhoneLoginScreen } from '../screens/auth/PhoneLoginScreen';
+import { DealerLedgerScreen } from '../screens/dealer/DealerLedgerScreen';
 import { DealerLoadsScreen } from '../screens/dealer/DealerLoadsScreen';
 import { DealerShipmentsScreen } from '../screens/dealer/DealerShipmentsScreen';
 import { DocumentsScreen } from '../screens/driver/DocumentsScreen';
@@ -41,7 +42,8 @@ export type DriverTabParamList = {
 
 export type DealerTabParamList = {
   Loads: undefined;
-  Shipments: undefined;
+  Fleet: undefined;
+  Ledger: undefined;
   Payments: undefined;
 };
 
@@ -121,11 +123,20 @@ function DealerTabs(): React.JSX.Element {
         }}
       />
       <DealerTab.Screen
-        name="Shipments"
+        name="Fleet"
         component={DealerShipmentsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="map-marker-path" size={size} color={color} />
+          ),
+        }}
+      />
+      <DealerTab.Screen
+        name="Ledger"
+        component={DealerLedgerScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="notebook-outline" size={size} color={color} />
           ),
         }}
       />

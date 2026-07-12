@@ -31,8 +31,8 @@ function seed(): DbShape {
         advancePercent: 70,
         status: 'open',
         bids: [
-          { id: 'bid-1', driverName: 'Gurpreet Singh', truckNumber: 'PB 10 AB 4321', amountInr: 41000, rating: 4.7, placedAt: now - 45 * 60 * 1000 },
-          { id: 'bid-2', driverName: 'Ramesh Yadav', truckNumber: 'RJ 14 CD 8890', amountInr: 43500, rating: 4.2, placedAt: now - 30 * 60 * 1000 },
+          { id: 'bid-1', driverName: 'Gurpreet Singh', truckNumber: 'PB 10 AB 4321', amountInr: 41000, rating: 4.7, kycVerified: true, placedAt: now - 45 * 60 * 1000 },
+          { id: 'bid-2', driverName: 'Ramesh Yadav', truckNumber: 'RJ 14 CD 8890', amountInr: 43500, rating: 4.2, kycVerified: false, placedAt: now - 30 * 60 * 1000 },
         ],
         postedAt: now - 90 * 60 * 1000,
       },
@@ -46,7 +46,7 @@ function seed(): DbShape {
         advancePercent: 60,
         status: 'open',
         bids: [
-          { id: 'bid-3', driverName: 'Suresh Patil', truckNumber: 'MH 04 EF 2210', amountInr: 30500, rating: 4.5, placedAt: now - 20 * 60 * 1000 },
+          { id: 'bid-3', driverName: 'Suresh Patil', truckNumber: 'MH 04 EF 2210', amountInr: 30500, rating: 4.5, kycVerified: true, placedAt: now - 20 * 60 * 1000 },
         ],
         postedAt: now - 30 * 60 * 1000,
       },
@@ -78,6 +78,26 @@ function seed(): DbShape {
       },
     ],
     shipments: [
+      {
+        id: 'shp-0',
+        loadId: 'load-x0',
+        origin: 'Delhi',
+        destination: 'Jaipur',
+        driverName: 'Ramesh Yadav',
+        truckNumber: 'RJ 14 CD 8890',
+        totalAmountInr: 40000,
+        advancePercent: 70,
+        stage: 'BALANCE_RELEASED',
+        pod: { uri: '', kind: 'document', fileName: 'pod-shp-0.pdf', uploadedAt: now - 5 * 24 * 3600 * 1000 },
+        events: [
+          { stage: 'CREATED', label: 'Load booked — escrow shipment created', at: now - 6 * 24 * 3600 * 1000 },
+          { stage: 'ADVANCE_PAID', label: 'Advance paid to fuel card (ref ADV-shp-0-28000)', at: now - 6 * 24 * 3600 * 1000 },
+          { stage: 'POD_UPLOADED', label: 'POD uploaded (pod-shp-0.pdf)', at: now - 5 * 24 * 3600 * 1000 },
+          { stage: 'BALANCE_RELEASED', label: 'Balance released from escrow (ref BAL-shp-0-12000)', at: now - 5 * 24 * 3600 * 1000 },
+        ],
+        ratingByDealer: null,
+        ratingByDriver: null,
+      },
       {
         id: 'shp-1',
         loadId: 'load-0',

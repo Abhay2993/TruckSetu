@@ -196,6 +196,20 @@ export const api = {
     return shipment;
   },
 
+  /** Two-way rating on a settled shipment. */
+  async rateShipment(
+    shipmentId: string,
+    stars: number,
+    as: 'dealer' | 'driver',
+  ): Promise<EscrowShipment | null> {
+    if (!isServerMode) return null;
+    const { shipment } = await request<{ shipment: EscrowShipment }>(
+      `/v1/shipments/${shipmentId}/rate`,
+      { method: 'POST', body: { stars, as } },
+    );
+    return shipment;
+  },
+
   // -------------------------------------------------------------------------
   // FASTag wallet (Feature E)
   // -------------------------------------------------------------------------

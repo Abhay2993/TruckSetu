@@ -28,6 +28,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
+import { RatingStars } from '../../components/RatingStars';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
 import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
@@ -53,6 +54,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   const confirmDispatch = useEscrowStore((s) => s.confirmDispatch);
   const attachPod = useEscrowStore((s) => s.attachPod);
   const releaseBalance = useEscrowStore((s) => s.releaseBalance);
+  const rateShipment = useEscrowStore((s) => s.rateShipment);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const shipment = useMemo(
@@ -141,6 +143,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
               return (
                 <Pressable
                   key={s.id}
+                  accessibilityRole="button"
                   onPress={() => setSelectedId(s.id)}
                   style={[styles.pickerChip, selected && styles.pickerChipSelected]}
                 >
@@ -262,11 +265,21 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           )}
 
           {shipment.stage === 'BALANCE_RELEASED' && (
-            <StatusNote
-              icon="checkmark-done-circle"
-              tone="success"
-              text={`Fully settled — ${formatINR(shipment.totalAmountInr)} paid.`}
-            />
+            <>
+              <StatusNote
+                icon="checkmark-done-circle"
+                tone="success"
+                text={`Fully settled — ${formatINR(shipment.totalAmountInr)} paid.`}
+              />
+              {/* Two-way trust: each side rates the other after settlement. */}
+              <RatingStars
+                label={role === 'dealer' ? `Rate ${shipment.driverName}` : 'Rate the dealer'}
+                value={role === 'dealer' ? shipment.ratingByDealer : shipment.ratingByDriver}
+                onRate={(stars) =>
+                  void rateShipment(shipment.id, stars, role === 'dealer' ? 'dealer' : 'driver')
+                }
+              />
+            </>
           )}
         </View>
 

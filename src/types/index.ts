@@ -63,6 +63,8 @@ export interface Bid {
   /** Driver's counter-offer in INR. */
   amountInr: number;
   rating: number;
+  /** KYC-verified driver badge — trust is the product in this market. */
+  kycVerified?: boolean;
   placedAt: number;
 }
 
@@ -112,6 +114,9 @@ export interface EscrowShipment {
   pod: ProofOfDelivery | null;
   /** Append-only audit trail rendered as the payment timeline. */
   events: EscrowEvent[];
+  /** Two-way ratings, settable once the shipment is fully settled. */
+  ratingByDealer?: number | null;
+  ratingByDriver?: number | null;
 }
 
 // ---------------------------------------------------------------------------

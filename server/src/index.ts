@@ -190,6 +190,7 @@ app.post('/v1/loads/:loadId/bids', requireAuth, (req, res) => {
     truckNumber,
     amountInr: Math.round(amount),
     rating: 4.0,
+    kycVerified: user.kycVerified ?? false,
     placedAt: Date.now(),
   };
   load.bids.push(bid);
@@ -329,6 +330,45 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
   pushEvent(shipment, `Balance released from escrow (ref ${referenceId})`);
   persist();
   res.json({ shipment });
+});
+
+app.post('/v1/shipments/:id/rate', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  // Ratings only after the money has fully moved — no rating hostage games.
+  if (shipment.stage !== 'BALANCE_RELEASED') {
+    res.status(409).json({ error: 'Ratings open once the shipment is settled.' });
+    return;
+  }
+  const stars = Number(req.body?.stars);
+  const as = req.body?.as;
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5 || (as !== 'dealer' && as !== 'driver')) {
+    res.status(400).json({ error: "stars must be 1-5 and 'as' must be dealer|driver." });
+    return;
+  }
+  if (as === 'dealer') shipment.ratingByDealer = stars;
+  else shipment.ratingByDriver = stars;
+  persist();
+  res.json({ shipment });
+});
+
+/**
+ * KYC (dev stand-in). Production: create a verification request with a KYC
+ * provider (DigiLocker / Karza / Signzy) and set kycVerified in its
+ * callback. Dev mode verifies immediately so the badge flow is testable.
+ */
+app.post('/v1/kyc/verify', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  if (!IS_DEV) {
+    res.status(501).json({ error: 'KYC provider integration pending — see server/src/index.ts.' });
+    return;
+  }
+  user.kycVerified = true;
+  persist();
+  res.json({ user });
 });
 
 // ---------------------------------------------------------------------------

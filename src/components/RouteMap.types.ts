@@ -10,12 +10,25 @@
 
 import type { Amenity, TelemetryPoint } from '../types';
 
+/** One truck on a fleet map, positioned by corridor progress. */
+export interface FleetTruck {
+  id: string;
+  /** Short label shown at the marker, e.g. the truck number's tail. */
+  label: string;
+  progress: number;
+}
+
 export interface RouteMapProps {
   amenities: Amenity[];
   /** 0..1 progress along the corridor — drives the canvas truck marker. */
   truckProgress: number;
   /** Latest real GPS fix — drives the native map's truck marker. */
   lastPoint?: TelemetryPoint | null;
+  /**
+   * Fleet mode (dealer dashboard): render one marker per truck instead of
+   * the single-truck marker.
+   */
+  fleet?: FleetTruck[];
   originLabel: string;
   destinationLabel: string;
   height?: number;

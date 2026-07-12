@@ -13,6 +13,7 @@ import { RouteMapCanvas } from './RouteMapCanvas';
 export function RouteMap({
   amenities,
   truckProgress,
+  fleet,
   originLabel,
   destinationLabel,
   height,
@@ -21,6 +22,7 @@ export function RouteMap({
     <RouteMapCanvas
       amenities={amenities}
       truckProgress={truckProgress}
+      fleet={fleet}
       originLabel={originLabel}
       destinationLabel={destinationLabel}
       height={height}

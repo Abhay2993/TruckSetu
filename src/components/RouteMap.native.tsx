@@ -38,6 +38,7 @@ export function RouteMap({
   amenities,
   truckProgress,
   lastPoint,
+  fleet,
   originLabel,
   destinationLabel,
   height = 230,
@@ -99,11 +100,26 @@ export function RouteMap({
           </Marker>
         ))}
 
-        <Marker coordinate={truckCoordinate} title="Your truck" anchor={{ x: 0.5, y: 0.5 }}>
-          <View style={styles.truckBubble}>
-            <MaterialCommunityIcons name="truck" size={15} color={colors.textInverse} />
-          </View>
-        </Marker>
+        {fleet ? (
+          fleet.map((truck) => (
+            <Marker
+              key={truck.id}
+              coordinate={interpolateAlongWaypoints(truck.progress)}
+              title={truck.label}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.truckBubble}>
+                <MaterialCommunityIcons name="truck" size={15} color={colors.textInverse} />
+              </View>
+            </Marker>
+          ))
+        ) : (
+          <Marker coordinate={truckCoordinate} title="Your truck" anchor={{ x: 0.5, y: 0.5 }}>
+            <View style={styles.truckBubble}>
+              <MaterialCommunityIcons name="truck" size={15} color={colors.textInverse} />
+            </View>
+          </Marker>
+        )}
       </MapView>
     </View>
   );

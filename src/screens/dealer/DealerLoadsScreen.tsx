@@ -94,9 +94,17 @@ export function DealerLoadsScreen(): React.JSX.Element {
                 {load.bids.map((bid) => (
                   <View key={bid.id} style={styles.bidRow}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.bidDriver}>
-                        {bid.driverName} · ★ {bid.rating.toFixed(1)}
-                      </Text>
+                      <View style={styles.bidNameRow}>
+                        <Text style={styles.bidDriver}>
+                          {bid.driverName} · ★ {bid.rating.toFixed(1)}
+                        </Text>
+                        {bid.kycVerified && (
+                          <View style={styles.kycBadge}>
+                            <Ionicons name="shield-checkmark" size={10} color={colors.success} />
+                            <Text style={styles.kycBadgeText}>KYC</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={styles.bidMeta}>{bid.truckNumber}</Text>
                     </View>
                     <Text style={styles.bidAmount}>{formatINR(bid.amountInr)}</Text>
@@ -311,10 +319,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  bidNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   bidDriver: {
     fontSize: fontSizes.sm,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  kycBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  kycBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.success,
   },
   bidMeta: {
     fontSize: fontSizes.xs,
