@@ -65,7 +65,9 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   // Alert instead of a silent no-op, because a driver standing at a delivery
   // gate needs to know whether the POD actually attached.
   const attach = (shipmentId: string, pod: ProofOfDelivery) => {
-    attachPod(shipmentId, pod);
+    // Optimistic: the store transitions locally first and mirrors to the
+    // server in the background (see useEscrowStore.attachPod).
+    void attachPod(shipmentId, pod);
     notify('POD attached', 'The dealer can now release your balance payment.');
   };
 

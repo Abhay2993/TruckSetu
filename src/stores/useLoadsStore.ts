@@ -9,6 +9,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { SEED_LOADS } from '../data/mock';
+import { api } from '../services/api';
 import type { Load } from '../types';
 import { useEscrowStore } from './useEscrowStore';
 
@@ -23,8 +24,10 @@ export interface PostLoadInput {
 
 interface LoadsState {
   loads: Load[];
-  postLoad: (input: PostLoadInput) => void;
-  acceptBid: (loadId: string, bidId: string) => void;
+  /** Throws ApiError in server mode when the backend rejects the load. */
+  postLoad: (input: PostLoadInput) => Promise<void>;
+  /** Throws ApiError in server mode when the backend rejects the accept. */
+  acceptBid: (loadId: string, bidId: string) => Promise<void>;
 }
 
 export const useLoadsStore = create<LoadsState>()(
@@ -32,24 +35,33 @@ export const useLoadsStore = create<LoadsState>()(
     (set, get) => ({
       loads: SEED_LOADS,
 
-      postLoad: (input) =>
-        set((s) => ({
-          loads: [
-            {
-              ...input,
-              id: `load-${Date.now()}`,
-              status: 'open',
-              bids: [],
-              postedAt: Date.now(),
-            },
-            ...s.loads,
-          ],
-        })),
+      postLoad: async (input) => {
+        // Server mode: server assigns the id and is the source of truth.
+        // Demo mode: createLoad returns null and we mint the load locally.
+        const remote = await api.createLoad(input);
+        const load: Load =
+          remote ?? {
+            ...input,
+            id: `load-${Date.now()}`,
+            status: 'open',
+            bids: [],
+            postedAt: Date.now(),
+          };
+        set((s) => ({ loads: [load, ...s.loads] }));
+      },
 
-      acceptBid: (loadId, bidId) => {
+      acceptBid: async (loadId, bidId) => {
         const load = get().loads.find((l) => l.id === loadId);
         const bid = load?.bids.find((b) => b.id === bidId);
         if (!load || !bid || load.status !== 'open') return;
+
+        const remote = await api.acceptBid(loadId, bidId);
+        if (remote) {
+          // Adopt the server's canonical load + shipment.
+          useEscrowStore.getState().addShipment(remote.shipment);
+          set((s) => ({ loads: s.loads.map((l) => (l.id === loadId ? remote.load : l)) }));
+          return;
+        }
 
         useEscrowStore.getState().addShipment({
           id: `shp-${Date.now()}`,

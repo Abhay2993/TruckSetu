@@ -15,15 +15,18 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { PhoneLoginScreen } from '../screens/auth/PhoneLoginScreen';
 import { DealerLoadsScreen } from '../screens/dealer/DealerLoadsScreen';
 import { DealerShipmentsScreen } from '../screens/dealer/DealerShipmentsScreen';
 import { DriverRouteScreen } from '../screens/driver/DriverRouteScreen';
 import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
 import { PaymentEscrowDashboard } from '../screens/shared/PaymentEscrowDashboard';
+import { syncFromServer } from '../services/sync';
 import { useAppStore } from '../stores/useAppStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { colors } from '../theme';
 
 export type DriverTabParamList = {
@@ -39,6 +42,7 @@ export type DealerTabParamList = {
 };
 
 export type OnboardingStackParamList = {
+  PhoneLogin: undefined;
   RoleSelect: undefined;
 };
 
@@ -116,11 +120,21 @@ function DealerTabs(): React.JSX.Element {
 
 export function RootNavigator(): React.JSX.Element {
   const role = useAppStore((s) => s.role);
-  const hasHydrated = useAppStore((s) => s.hasHydrated);
+  const appHydrated = useAppStore((s) => s.hasHydrated);
+  const token = useAuthStore((s) => s.token);
+  const authHydrated = useAuthStore((s) => s.hasHydrated);
 
-  // Hold rendering until AsyncStorage rehydrates, otherwise a returning
-  // driver would flash the onboarding screen on every cold start.
-  if (!hasHydrated) {
+  // On a warm start with a stored session, refresh loads/shipments/wallet
+  // from the server (no-op in demo mode).
+  useEffect(() => {
+    if (authHydrated && token) {
+      void syncFromServer();
+    }
+  }, [authHydrated, token]);
+
+  // Hold rendering until both persisted stores rehydrate, otherwise a
+  // returning user would flash the login screen on every cold start.
+  if (!appHydrated || !authHydrated) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.accent} />
@@ -128,6 +142,16 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
+  // Gate 1: authentication.
+  if (!token) {
+    return (
+      <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
+        <OnboardingStack.Screen name="PhoneLogin" component={PhoneLoginScreen} />
+      </OnboardingStack.Navigator>
+    );
+  }
+
+  // Gate 2: role selection (Feature B).
   if (role === 'driver') return <DriverTabs />;
   if (role === 'dealer') return <DealerTabs />;
 

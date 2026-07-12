@@ -13,6 +13,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DynamicHeader } from '../../components/DynamicHeader';
 import { SUPPORTED_LOCALES, useTranslation } from '../../i18n/i18n';
+import { api } from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { UserRole } from '../../types';
@@ -22,6 +23,13 @@ export function RoleSelectScreen(): React.JSX.Element {
   const locale = useAppStore((s) => s.locale);
   const setLocale = useAppStore((s) => s.setLocale);
   const setRole = useAppStore((s) => s.setRole);
+
+  const chooseRole = (role: UserRole) => {
+    setRole(role);
+    // Persist the choice server-side so the next login skips this screen;
+    // fire-and-forget — a failure only means re-asking next time.
+    void api.updateProfile({ role }).catch(() => {});
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -58,14 +66,14 @@ export function RoleSelectScreen(): React.JSX.Element {
           title={t('roleDriver')}
           description={t('roleDriverDesc')}
           icon={<MaterialCommunityIcons name="truck-fast" size={34} color={colors.accent} />}
-          onSelect={setRole}
+          onSelect={chooseRole}
         />
         <RoleCard
           role="dealer"
           title={t('roleDealer')}
           description={t('roleDealerDesc')}
           icon={<Ionicons name="briefcase" size={30} color={colors.accent} />}
-          onSelect={setRole}
+          onSelect={chooseRole}
         />
       </ScrollView>
     </SafeAreaView>

@@ -35,14 +35,24 @@ export const useFastagStore = create<FastagState>()(
         if (amountInr <= 0) return false;
         set({ isToppingUp: true });
         try {
-          const { upiRef } = await api.topUpFastag(amountInr);
-          set((s) => ({
-            balanceInr: s.balanceInr + amountInr,
-            transactions: [
-              { id: upiRef, label: `Top-up via UPI (${upiRef.slice(0, 10)}…)`, amountInr, at: Date.now() },
-              ...s.transactions,
-            ],
-          }));
+          const result = await api.topUpFastag(amountInr);
+          if (result.balanceInr !== undefined && result.transactions) {
+            // Server mode: adopt the authoritative wallet state.
+            set({ balanceInr: result.balanceInr, transactions: result.transactions });
+          } else {
+            set((s) => ({
+              balanceInr: s.balanceInr + amountInr,
+              transactions: [
+                {
+                  id: result.upiRef,
+                  label: `Top-up via UPI (${result.upiRef.slice(0, 10)}…)`,
+                  amountInr,
+                  at: Date.now(),
+                },
+                ...s.transactions,
+              ],
+            }));
+          }
           return true;
         } catch {
           return false;

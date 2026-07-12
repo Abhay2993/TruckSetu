@@ -9,6 +9,14 @@
 /** The two user personas the app serves (Feature B). */
 export type UserRole = 'driver' | 'dealer';
 
+/** Authenticated user, as returned by the auth endpoints. */
+export interface AuthUser {
+  id: string;
+  phone: string;
+  name: string | null;
+  role: UserRole | null;
+}
+
 /** Supported vernacular locales (Feature F). */
 export type Locale = 'en' | 'hi' | 'pa' | 'te' | 'ta';
 

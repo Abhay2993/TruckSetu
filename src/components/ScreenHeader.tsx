@@ -7,8 +7,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTranslation } from '../i18n/i18n';
 import { useAppStore } from '../stores/useAppStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { colors, fontSizes, radii, spacing } from '../theme';
+import { confirmAction } from '../utils/dialog';
 import { DynamicHeader } from './DynamicHeader';
 
 interface ScreenHeaderProps {
@@ -18,7 +21,18 @@ interface ScreenHeaderProps {
 }
 
 export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): React.JSX.Element {
+  const t = useTranslation();
   const setRole = useAppStore((s) => s.setRole);
+  const signOut = useAuthStore((s) => s.signOut);
+
+  const handleSignOut = async () => {
+    const ok = await confirmAction(
+      `${t('signOut')}?`,
+      'You will need to verify your mobile number again.',
+      t('signOut'),
+    );
+    if (ok) signOut();
+  };
 
   return (
     <View style={styles.container}>
@@ -49,6 +63,15 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
           style={styles.switchBtn}
         >
           <Ionicons name="swap-horizontal" size={18} color={colors.textSecondary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('signOut')}
+          onPress={() => void handleSignOut()}
+          hitSlop={8}
+          style={styles.switchBtn}
+        >
+          <Ionicons name="log-out-outline" size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
     </View>

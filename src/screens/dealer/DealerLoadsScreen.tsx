@@ -38,7 +38,12 @@ export function DealerLoadsScreen(): React.JSX.Element {
       `Book ${driverName} for ${load.origin} → ${load.destination}? An escrow shipment will be created.`,
       'Accept',
     );
-    if (ok) acceptBid(load.id, bidId);
+    if (!ok) return;
+    try {
+      await acceptBid(load.id, bidId);
+    } catch (e) {
+      notify('Could not accept bid', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   return (
@@ -133,7 +138,7 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
   const [weight, setWeight] = useState('');
   const [price, setPrice] = useState('');
 
-  const submit = () => {
+  const submit = async () => {
     const weightTonnes = Number(weight);
     const priceInr = Number(price);
     if (!origin.trim() || !destination.trim() || !material.trim()) {
@@ -144,14 +149,20 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
       notify('Invalid numbers', 'Weight and freight amount must be positive numbers.');
       return;
     }
-    postLoad({
-      origin: origin.trim(),
-      destination: destination.trim(),
-      material: material.trim(),
-      weightTonnes,
-      priceInr,
-      advancePercent: 70,
-    });
+    try {
+      await postLoad({
+        origin: origin.trim(),
+        destination: destination.trim(),
+        material: material.trim(),
+        weightTonnes,
+        priceInr,
+        advancePercent: 70,
+      });
+    } catch (e) {
+      // Server mode: the backend rejected the load — keep the sheet open.
+      notify('Could not post load', e instanceof Error ? e.message : 'Please try again.');
+      return;
+    }
     setOrigin('');
     setDestination('');
     setMaterial('');
@@ -216,7 +227,7 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
 
           <Pressable
             accessibilityRole="button"
-            onPress={submit}
+            onPress={() => void submit()}
             style={({ pressed }) => [styles.submitBtn, pressed && { opacity: 0.8 }]}
           >
             <Text style={styles.submitBtnText}>Post load (70% advance)</Text>

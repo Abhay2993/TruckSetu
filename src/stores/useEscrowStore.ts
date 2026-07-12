@@ -28,7 +28,7 @@ interface EscrowState {
   processingIds: string[];
   addShipment: (shipment: EscrowShipment) => void;
   confirmDispatch: (shipmentId: string) => Promise<void>;
-  attachPod: (shipmentId: string, pod: ProofOfDelivery) => void;
+  attachPod: (shipmentId: string, pod: ProofOfDelivery) => Promise<void>;
   releaseBalance: (shipmentId: string) => Promise<void>;
 }
 
@@ -75,13 +75,21 @@ export const useEscrowStore = create<EscrowState>()(
         const { advanceInr } = splitAmounts(shipment);
         try {
           // Stage 1 fires automatically on dispatch — no extra user action.
-          const { referenceId } = await api.triggerAdvancePayout(shipmentId, advanceInr);
+          // Server mode returns the authoritative shipment; demo mode
+          // returns null and the equivalent transition is applied locally.
+          const remote = await api.dispatchShipment(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) => (sh.id === shipmentId ? remote : sh)),
+            }));
+            return;
+          }
           set((s) => ({
             shipments: transition(
               s.shipments,
               shipmentId,
               'ADVANCE_PAID',
-              `Advance paid to fuel card (ref ${referenceId})`,
+              `Advance paid to fuel card (ref ADV-${shipmentId}-${advanceInr})`,
             ),
           }));
         } catch {
@@ -105,9 +113,11 @@ export const useEscrowStore = create<EscrowState>()(
         }
       },
 
-      attachPod: (shipmentId, pod) => {
+      attachPod: async (shipmentId, pod) => {
         const shipment = get().shipments.find((s) => s.id === shipmentId);
         if (!shipment || shipment.stage !== 'ADVANCE_PAID') return;
+        // Optimistic local transition — the POD file lives on-device, so the
+        // driver's copy is correct regardless of connectivity.
         set((s) => ({
           shipments: transition(
             s.shipments,
@@ -117,6 +127,22 @@ export const useEscrowStore = create<EscrowState>()(
             { pod },
           ),
         }));
+        try {
+          const remote = await api.uploadPod(shipmentId, pod);
+          if (remote) {
+            // Server copy is authoritative but must not clobber the local
+            // file uri (the server only stores metadata).
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+          }
+        } catch (error) {
+          // Local state stands; the next releaseBalance surfaces any
+          // server-side stage mismatch as a retryable failure event.
+          console.warn('[escrow] POD server sync failed', error);
+        }
       },
 
       releaseBalance: async (shipmentId) => {
@@ -127,13 +153,21 @@ export const useEscrowStore = create<EscrowState>()(
         set((s) => ({ processingIds: [...s.processingIds, shipmentId] }));
         const { balanceInr } = splitAmounts(shipment);
         try {
-          const { referenceId } = await api.releaseEscrowBalance(shipmentId, balanceInr);
+          const remote = await api.releaseShipmentBalance(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+            return;
+          }
           set((s) => ({
             shipments: transition(
               s.shipments,
               shipmentId,
               'BALANCE_RELEASED',
-              `Balance released from escrow (ref ${referenceId})`,
+              `Balance released from escrow (ref BAL-${shipmentId}-${balanceInr})`,
             ),
           }));
         } catch {
