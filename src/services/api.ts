@@ -195,6 +195,18 @@ export const api = {
     return request<{ balanceInr: number; transactions: FastagTransaction[] }>('/v1/fastag');
   },
 
+  /**
+   * Real-UPI path: ask the server for a upi:// deep link the phone can open
+   * in GPay/PhonePe/Paytm. Null in demo mode (simulated top-up instead).
+   */
+  async getFastagTopUpIntent(amountInr: number): Promise<{ upiUri: string; payeeVpa: string } | null> {
+    if (!isServerMode) return null;
+    return request<{ upiUri: string; payeeVpa: string }>('/v1/fastag/topup/intent', {
+      method: 'POST',
+      body: { amountInr },
+    });
+  },
+
   async topUpFastag(amountInr: number): Promise<FastagTopUpResult> {
     if (isServerMode) {
       return request<FastagTopUpResult>('/v1/fastag/topup', {

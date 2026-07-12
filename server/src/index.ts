@@ -11,11 +11,21 @@ import cors from 'cors';
 import express from 'express';
 import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyOtp } from './auth';
 import { db, newId, persist } from './db';
+import { buildUpiIntent, executePayout, paymentsMode, verifyWebhookSignature } from './payments';
 import { Bid, EscrowShipment, FastagWallet, Load, TelemetryPoint } from './types';
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+// Keep the raw body around: webhook signatures are computed over the exact
+// bytes received, not the re-serialised JSON.
+app.use(
+  express.json({
+    limit: '2mb',
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buf.toString();
+    },
+  }),
+);
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -233,7 +243,7 @@ app.get('/v1/shipments', requireAuth, (_req, res) => {
   res.json({ shipments: db.shipments });
 });
 
-app.post('/v1/shipments/:id/dispatch', requireAuth, (req, res) => {
+app.post('/v1/shipments/:id/dispatch', requireAuth, async (req, res) => {
   const shipment = db.shipments.find((s) => s.id === req.params.id);
   if (!shipment) {
     res.status(404).json({ error: 'Shipment not found.' });
@@ -245,13 +255,19 @@ app.post('/v1/shipments/:id/dispatch', requireAuth, (req, res) => {
   }
   const { advanceInr } = splitAmounts(shipment);
 
+  // Stage 1 fires automatically on dispatch — execute the payout FIRST so a
+  // failed payment leaves the shipment dispatchable again, never half-paid.
+  let referenceId: string;
+  try {
+    ({ referenceId } = await executePayout('advance', shipment.id, advanceInr));
+  } catch (error) {
+    console.error('[payments] advance payout failed', error);
+    res.status(502).json({ error: 'Advance payout failed — try dispatching again.' });
+    return;
+  }
+
   shipment.stage = 'DISPATCHED';
   pushEvent(shipment, 'Load confirmed & dispatched');
-
-  // Stage 1 fires automatically on dispatch. This is where a real payment
-  // rail (Razorpay Payouts / bank transfer to the fuel card) gets called;
-  // the reference id shape matches what the app already renders.
-  const referenceId = `ADV-${shipment.id}-${advanceInr}`;
   shipment.stage = 'ADVANCE_PAID';
   pushEvent(shipment, `Advance paid to fuel card (ref ${referenceId})`);
 
@@ -289,7 +305,7 @@ app.post('/v1/shipments/:id/pod', requireAuth, (req, res) => {
   res.json({ shipment });
 });
 
-app.post('/v1/shipments/:id/release', requireAuth, (req, res) => {
+app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
   const shipment = db.shipments.find((s) => s.id === req.params.id);
   if (!shipment) {
     res.status(404).json({ error: 'Shipment not found.' });
@@ -301,7 +317,14 @@ app.post('/v1/shipments/:id/release', requireAuth, (req, res) => {
     return;
   }
   const { balanceInr } = splitAmounts(shipment);
-  const referenceId = `BAL-${shipment.id}-${balanceInr}`;
+  let referenceId: string;
+  try {
+    ({ referenceId } = await executePayout('balance', shipment.id, balanceInr));
+  } catch (error) {
+    console.error('[payments] balance payout failed', error);
+    res.status(502).json({ error: 'Balance payout failed — try releasing again.' });
+    return;
+  }
   shipment.stage = 'BALANCE_RELEASED';
   pushEvent(shipment, `Balance released from escrow (ref ${referenceId})`);
   persist();
@@ -362,6 +385,20 @@ app.get('/v1/fastag', requireAuth, (req, res) => {
   res.json(wallet(user.id));
 });
 
+/**
+ * Step 1 of a real top-up: hand the app a UPI deep link to open in the
+ * user's UPI app. Step 2 (crediting the wallet) should arrive via the PSP
+ * webhook in production; the /topup endpoint below stands in until then.
+ */
+app.post('/v1/fastag/topup/intent', requireAuth, (req, res) => {
+  const amount = Number(req.body?.amountInr);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+    res.status(400).json({ error: 'amountInr must be between 1 and 1,00,000.' });
+    return;
+  }
+  res.json({ ...buildUpiIntent(Math.round(amount), 'FASTag top-up'), amountInr: Math.round(amount) });
+});
+
 app.post('/v1/fastag/topup', requireAuth, (req, res) => {
   const { user } = req as AuthedRequest;
   const amount = Number(req.body?.amountInr);
@@ -385,7 +422,32 @@ app.post('/v1/fastag/topup', requireAuth, (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Payment-provider webhook (Razorpay). Signature-verified; unauthenticated
+// by design (the PSP calls it), which is exactly why the HMAC check matters.
+// ---------------------------------------------------------------------------
+
+app.post('/v1/payments/webhook', (req, res) => {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET ?? (IS_DEV ? 'dev-webhook-secret' : null);
+  if (!secret) {
+    res.status(503).json({ error: 'Webhook secret not configured.' });
+    return;
+  }
+  const signature = req.headers['x-razorpay-signature'];
+  const rawBody = (req as express.Request & { rawBody?: string }).rawBody ?? '';
+  if (typeof signature !== 'string' || !verifyWebhookSignature(rawBody, signature, secret)) {
+    res.status(401).json({ error: 'Invalid webhook signature.' });
+    return;
+  }
+  const event = (req.body ?? {}) as { event?: string };
+  // Handle the events you subscribe to: payment.captured → credit the
+  // FASTag wallet / mark escrow funded; payout.processed → confirm the
+  // driver payout landed. Foundation logs and acknowledges.
+  console.log(`[webhook] verified event: ${event.event ?? 'unknown'}`);
+  res.json({ ok: true });
+});
 
 app.listen(PORT, () => {
-  console.log(`TruckSetu server listening on :${PORT} (${IS_DEV ? 'dev' : 'production'} mode)`);
+  console.log(
+    `TruckSetu server listening on :${PORT} (${IS_DEV ? 'dev' : 'production'} mode, payments: ${paymentsMode})`,
+  );
 });

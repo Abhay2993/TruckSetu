@@ -6,11 +6,12 @@
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from '../i18n/i18n';
+import { api } from '../services/api';
 import { LOW_BALANCE_THRESHOLD_INR, useFastagStore } from '../stores/useFastagStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../theme';
-import { notify } from '../utils/dialog';
+import { confirmAction, notify } from '../utils/dialog';
 import { formatINR } from '../utils/format';
 
 const QUICK_AMOUNTS = [500, 1000, 2000] as const;
@@ -25,6 +26,28 @@ export function FastagCard(): React.JSX.Element {
   const isLow = balanceInr < LOW_BALANCE_THRESHOLD_INR;
 
   const handleTopUp = async () => {
+    // Real-UPI path (phones, server mode): open the user's UPI app with a
+    // pre-filled payment, then confirm. Production hardening: the wallet
+    // credit should be driven by the PSP webhook, not this confirmation —
+    // the server endpoint for that is already in place.
+    if (Platform.OS !== 'web') {
+      try {
+        const intent = await api.getFastagTopUpIntent(selectedAmount);
+        if (intent) {
+          await Linking.openURL(intent.upiUri);
+          const paid = await confirmAction(
+            'Complete the payment',
+            `Pay ${formatINR(selectedAmount)} to ${intent.payeeVpa} in your UPI app, then confirm here.`,
+            'I have paid',
+          );
+          if (!paid) return;
+        }
+      } catch {
+        notify('No UPI app found', 'Install any UPI app (GPay, PhonePe, Paytm) to top up.');
+        return;
+      }
+    }
+
     const ok = await topUp(selectedAmount);
     if (ok) {
       notify('Top-up successful', `${formatINR(selectedAmount)} added via UPI.`);
