@@ -14,6 +14,13 @@ import { db, newId, persist } from './db';
 import { notifyUser } from './notify';
 import { buildUpiIntent, executePayout, paymentsMode, verifyWebhookSignature } from './payments';
 import {
+  parseLoadMessage,
+  sendWhatsApp,
+  WHATSAPP_HELP_REPLY,
+  WHATSAPP_VERIFY_TOKEN,
+  whatsappMode,
+} from './whatsapp';
+import {
   Bid,
   ChatMessage,
   Dispute,
@@ -140,6 +147,15 @@ app.put('/v1/me', requireAuth, (req, res) => {
     }
     user.role = role;
   }
+  if (req.body?.whatsappOptIn !== undefined) {
+    user.whatsappOptIn = Boolean(req.body.whatsappOptIn);
+    if (user.whatsappOptIn) {
+      void sendWhatsApp(
+        user.phone,
+        'Welcome to TruckSetu on WhatsApp! 🚛 You will get bid, payment and POD updates here. Reply STOP to opt out.',
+      );
+    }
+  }
   persist();
   res.json({ user });
 });
@@ -192,6 +208,13 @@ app.post('/v1/loads', requireAuth, (req, res) => {
       typeof req.body?.consignmentNo === 'string' && req.body.consignmentNo.trim()
         ? req.body.consignmentNo.trim()
         : `LR-${Math.floor(10000 + Math.random() * 90000)}`,
+    // Goods-in-transit insurance: premium = 0.35% of freight, min ₹99.
+    // Production: bind the policy with the insurer's API (Digit / ICICI
+    // Lombard) here and store the policy number.
+    insured: Boolean(req.body?.insured),
+    insurancePremiumInr: req.body?.insured
+      ? Math.max(99, Math.round(price * 0.0035))
+      : undefined,
     dealerId: user.id,
   };
   db.loads.unshift(load);
@@ -267,6 +290,7 @@ app.post('/v1/loads/:loadId/bids/:bidId/accept', requireAuth, (req, res) => {
     events: [],
     consignmentNo: load.consignmentNo,
     disputeId: null,
+    insured: load.insured,
     dealerId: user.id,
     driverId: bid.driverId,
   };
@@ -431,6 +455,60 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
     });
   }
   res.json({ shipment });
+});
+
+/**
+ * Instant payout (invoice factoring): once the POD is in, the driver can
+ * cash out the escrowed balance immediately for a fee instead of waiting
+ * for the dealer's release. The fee is TruckSetu's factoring revenue.
+ * Guards mirror release: POD_UPLOADED stage, no open dispute.
+ */
+const INSTANT_PAYOUT_FEE_RATE = 0.015; // 1.5%
+
+app.post('/v1/shipments/:id/instant-payout', requireAuth, async (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  if (shipment.stage !== 'POD_UPLOADED') {
+    res.status(409).json({ error: 'Instant payout needs an uploaded POD.' });
+    return;
+  }
+  if (shipment.disputeId) {
+    res.status(409).json({ error: 'An open dispute is holding this escrow.' });
+    return;
+  }
+  const { balanceInr } = splitAmounts(shipment);
+  const feeInr = Math.max(49, Math.round(balanceInr * INSTANT_PAYOUT_FEE_RATE));
+  const netInr = balanceInr - feeInr;
+
+  let referenceId: string;
+  try {
+    ({ referenceId } = await executePayout('balance', shipment.id, netInr));
+  } catch (error) {
+    console.error('[payments] instant payout failed', error);
+    res.status(502).json({ error: 'Instant payout failed — try again.' });
+    return;
+  }
+
+  shipment.stage = 'BALANCE_RELEASED';
+  shipment.instantPayoutFeeInr = feeInr;
+  pushEvent(
+    shipment,
+    `Instant payout: ${netInr} paid now (fee ${feeInr} @ 1.5%, ref ${referenceId})`,
+  );
+  persist();
+  if (shipment.dealerId) {
+    notifyUser({
+      userId: shipment.dealerId,
+      kind: 'balance_released',
+      title: 'Driver took instant payout',
+      body: `${shipment.origin} → ${shipment.destination} settled via instant payout.`,
+      shipmentId: shipment.id,
+    });
+  }
+  res.json({ shipment, feeInr, netInr });
 });
 
 app.post('/v1/shipments/:id/rate', requireAuth, (req, res) => {
@@ -873,6 +951,98 @@ app.post('/v1/sos/:id/resolve', requireAuth, (req, res) => {
 
 app.get('/v1/sos', requireAuth, (_req, res) => {
   res.json({ alerts: db.sosAlerts.filter((a) => a.resolvedAt === null) });
+});
+
+// ---------------------------------------------------------------------------
+// WhatsApp webhook (Meta Cloud API). GET = Meta's verification handshake;
+// POST = inbound messages. A dealer can post a load by messaging
+// "LOAD Delhi to Jaipur, 18 ton cement, 42000" — the sender's phone maps to
+// their TruckSetu account, and the reply confirms with the LR number.
+// ---------------------------------------------------------------------------
+
+app.get('/v1/whatsapp/webhook', (req, res) => {
+  if (
+    req.query['hub.mode'] === 'subscribe' &&
+    req.query['hub.verify_token'] === WHATSAPP_VERIFY_TOKEN
+  ) {
+    res.send(req.query['hub.challenge']);
+    return;
+  }
+  res.status(403).json({ error: 'Verification failed.' });
+});
+
+/** Shared handler so the dev simulate endpoint drives the same code path. */
+async function handleInboundWhatsApp(fromRaw: string, text: string): Promise<string> {
+  const phone = normalizePhone(fromRaw) ?? fromRaw;
+  const user = db.users.find((u) => u.phone === phone);
+
+  if (/^stop$/i.test(text.trim())) {
+    if (user) {
+      user.whatsappOptIn = false;
+      persist();
+    }
+    return 'You will no longer receive TruckSetu updates on WhatsApp.';
+  }
+
+  if (/^status$/i.test(text.trim())) {
+    const latest = db.shipments.find(
+      (s) => s.dealerId === user?.id || s.driverId === user?.id,
+    ) ?? db.shipments[0];
+    return latest
+      ? `Latest shipment ${latest.origin} → ${latest.destination}: ${latest.stage.replace(/_/g, ' ')}.`
+      : 'No shipments yet.';
+  }
+
+  const parsed = parseLoadMessage(text);
+  if (!parsed) return WHATSAPP_HELP_REPLY;
+  if (!user) {
+    return 'This number is not registered on TruckSetu yet — download the app and log in once, then post loads right here.';
+  }
+
+  const load: Load = {
+    id: newId('load'),
+    ...parsed,
+    advancePercent: 70,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now(),
+    consignmentNo: `LR-${Math.floor(10000 + Math.random() * 90000)}`,
+    dealerId: user.id,
+  };
+  db.loads.unshift(load);
+  persist();
+  return `✅ Load posted: ${load.origin} → ${load.destination}, ${load.weightTonnes}T ${load.material}, ₹${load.priceInr} (${load.consignmentNo}). Bids will arrive in your TruckSetu app.`;
+}
+
+app.post('/v1/whatsapp/webhook', async (req, res) => {
+  // Meta's envelope: entry[].changes[].value.messages[]
+  const message = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+  if (message?.type === 'text' && typeof message.from === 'string') {
+    const reply = await handleInboundWhatsApp(message.from, message.text?.body ?? '');
+    void sendWhatsApp(normalizePhone(message.from) ?? message.from, reply);
+  }
+  res.json({ ok: true }); // always 200 — Meta retries non-2xx aggressively
+});
+
+/** Dev stand-in for Meta: inject an inbound message, get the reply back. */
+app.post('/v1/whatsapp/simulate-inbound', async (req, res) => {
+  if (!IS_DEV) {
+    res.status(403).json({ error: 'Dev only.' });
+    return;
+  }
+  const { from, text } = req.body ?? {};
+  if (typeof from !== 'string' || typeof text !== 'string') {
+    res.status(400).json({ error: 'from and text are required.' });
+    return;
+  }
+  const reply = await handleInboundWhatsApp(from, text);
+  void sendWhatsApp(normalizePhone(from) ?? from, reply);
+  res.json({ reply });
+});
+
+/** Outbox inspection (dev): what would have gone to WhatsApp. */
+app.get('/v1/whatsapp/outbox', requireAuth, (_req, res) => {
+  res.json({ mode: whatsappMode, outbox: db.whatsappOutbox.slice(0, 20) });
 });
 
 // ---------------------------------------------------------------------------

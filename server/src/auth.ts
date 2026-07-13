@@ -15,6 +15,7 @@ import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { db, newId, persist } from './db';
 import { User } from './types';
+import { sendWhatsApp } from './whatsapp';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'trucksetu-dev-secret-change-me';
 const TOKEN_TTL = '30d';
@@ -61,6 +62,12 @@ export function requestOtp(phone: string): { devOtp?: string } | { error: string
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   pendingOtps.set(phone, { code, expiresAt: now + OTP_TTL_MS, attemptsLeft: 3 });
   sendSms(phone, `Your TruckSetu OTP is ${code}. Valid for 5 minutes.`);
+  // WhatsApp mirror for users who opted in on a previous login. Production:
+  // use a Meta-approved "authentication" template for OTP delivery.
+  const existing = db.users.find((u) => u.phone === phone);
+  if (existing?.whatsappOptIn) {
+    void sendWhatsApp(phone, `Your TruckSetu OTP is ${code}. Valid for 5 minutes.`);
+  }
   return IS_DEV ? { devOtp: code } : {};
 }
 

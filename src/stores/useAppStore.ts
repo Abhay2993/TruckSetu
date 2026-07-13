@@ -13,10 +13,13 @@ import type { Locale, UserRole } from '../types';
 interface AppState {
   role: UserRole | null;
   locale: Locale;
+  /** Mirror notifications/OTPs to WhatsApp (synced to the server profile). */
+  whatsappOptIn: boolean;
   /** True once the persisted state has been read back from disk. */
   hasHydrated: boolean;
   setRole: (role: UserRole | null) => void;
   setLocale: (locale: Locale) => void;
+  setWhatsappOptIn: (v: boolean) => void;
   setHasHydrated: (v: boolean) => void;
 }
 
@@ -25,15 +28,17 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       role: null,
       locale: 'en',
+      whatsappOptIn: false,
       hasHydrated: false,
       setRole: (role) => set({ role }),
       setLocale: (locale) => set({ locale }),
+      setWhatsappOptIn: (v) => set({ whatsappOptIn: v }),
       setHasHydrated: (v) => set({ hasHydrated: v }),
     }),
     {
       name: 'trucksetu-app',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (s) => ({ role: s.role, locale: s.locale }),
+      partialize: (s) => ({ role: s.role, locale: s.locale, whatsappOptIn: s.whatsappOptIn }),
       onRehydrateStorage: () => (state, error) => {
         // Mark hydration complete even when the read fails (state is
         // undefined on error) — otherwise RootNavigator's loading gate

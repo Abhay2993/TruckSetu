@@ -24,6 +24,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
+import { estimateTripPnl } from '../../services/tripPnl';
 import { useDriverStore } from '../../stores/useDriverStore';
 import { useEscrowStore } from '../../stores/useEscrowStore';
 import { useLoadsStore } from '../../stores/useLoadsStore';
@@ -146,6 +147,14 @@ function BidModal({ load, onClose }: { load: Load | null; onClose: () => void })
     }
   }, [load, truckNumber]);
 
+  // Trip P&L: recompute live as the driver types their ask, so the bid is a
+  // decision ("this leaves me ₹6,200") instead of guesswork.
+  const askInr = Number(amount);
+  const pnl =
+    load && Number.isFinite(askInr) && askInr > 0
+      ? estimateTripPnl(load.origin, load.destination, askInr)
+      : null;
+
   const submit = async () => {
     if (!load) return;
     const amountInr = Number(amount);
@@ -178,7 +187,7 @@ function BidModal({ load, onClose }: { load: Load | null; onClose: () => void })
             <Text style={styles.modalTitle}>
               {t('placeBid')} · {load?.origin} → {load?.destination}
             </Text>
-            <Pressable accessibilityRole="button" onPress={onClose} hitSlop={8}>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close bid sheet" onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={22} color={colors.textSecondary} />
             </Pressable>
           </View>
@@ -198,6 +207,32 @@ function BidModal({ load, onClose }: { load: Load | null; onClose: () => void })
             value={truck}
             onChangeText={setTruck}
           />
+
+          {pnl && (
+            <View style={[styles.pnlCard, pnl.profitInr < 0 && styles.pnlCardLoss]}>
+              <View style={styles.pnlHeader}>
+                <Ionicons
+                  name={pnl.profitInr >= 0 ? 'trending-up' : 'trending-down'}
+                  size={16}
+                  color={pnl.profitInr >= 0 ? colors.success : colors.danger}
+                />
+                <Text
+                  style={[
+                    styles.pnlProfit,
+                    { color: pnl.profitInr >= 0 ? colors.success : colors.danger },
+                  ]}
+                >
+                  Est. profit {formatINR(pnl.profitInr)}
+                </Text>
+                <Text style={styles.pnlKm}>{pnl.distanceKm} km</Text>
+              </View>
+              <Text style={styles.pnlBreakdown}>
+                Diesel {formatINR(pnl.dieselInr)} ({pnl.dieselLitres}L) · Tolls{' '}
+                {formatINR(pnl.tollsInr)} · Food/stay {formatINR(pnl.bhattaInr)}
+              </Text>
+            </View>
+          )}
+
           <Pressable
             accessibilityRole="button"
             onPress={() => void submit()}
@@ -336,6 +371,34 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.md,
     color: colors.textPrimary,
     backgroundColor: colors.background,
+  },
+  pnlCard: {
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    gap: 4,
+  },
+  pnlCardLoss: {
+    backgroundColor: colors.dangerSoft,
+  },
+  pnlHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pnlProfit: {
+    flex: 1,
+    fontSize: fontSizes.md,
+    fontWeight: '800',
+  },
+  pnlKm: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    fontWeight: '700',
+  },
+  pnlBreakdown: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   submitBtn: {
     backgroundColor: colors.accent,

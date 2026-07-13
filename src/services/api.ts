@@ -86,7 +86,11 @@ export const api = {
   },
 
   /** Fire-and-forget profile sync; no-op in demo mode. */
-  async updateProfile(update: { name?: string; role?: UserRole }): Promise<void> {
+  async updateProfile(update: {
+    name?: string;
+    role?: UserRole;
+    whatsappOptIn?: boolean;
+  }): Promise<void> {
     if (!isServerMode) return;
     await request('/v1/me', { method: 'PUT', body: update });
   },
@@ -132,6 +136,7 @@ export const api = {
     weightTonnes: number;
     priceInr: number;
     advancePercent: number;
+    insured?: boolean;
   }): Promise<Load | null> {
     if (!isServerMode) return null;
     const { load } = await request<{ load: Load }>('/v1/loads', { method: 'POST', body: input });
@@ -208,6 +213,24 @@ export const api = {
       { method: 'POST' },
     );
     return shipment;
+  },
+
+  /**
+   * Instant payout (factoring): cash out the escrowed balance now for a fee.
+   * Server mode returns the settled shipment + fee; demo mode returns null
+   * and the store applies the identical transition locally.
+   */
+  async instantPayout(
+    shipmentId: string,
+  ): Promise<{ shipment: EscrowShipment; feeInr: number; netInr: number } | null> {
+    if (!isServerMode) {
+      await delay(SIMULATED_LATENCY_MS);
+      return null;
+    }
+    return request<{ shipment: EscrowShipment; feeInr: number; netInr: number }>(
+      `/v1/shipments/${shipmentId}/instant-payout`,
+      { method: 'POST' },
+    );
   },
 
   /** Two-way rating on a settled shipment. */

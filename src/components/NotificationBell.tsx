@@ -7,7 +7,9 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Modal, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { api } from '../services/api';
+import { useAppStore } from '../stores/useAppStore';
 import { useNotificationsStore } from '../stores/useNotificationsStore';
 import { colors, fontSizes, radii, spacing } from '../theme';
 import { timeAgo } from '../utils/format';
@@ -29,7 +31,15 @@ export function NotificationBell(): React.JSX.Element {
   const unread = useNotificationsStore((s) => s.unread);
   const refresh = useNotificationsStore((s) => s.refresh);
   const markAllRead = useNotificationsStore((s) => s.markAllRead);
+  const whatsappOptIn = useAppStore((s) => s.whatsappOptIn);
+  const setWhatsappOptIn = useAppStore((s) => s.setWhatsappOptIn);
   const [open, setOpen] = useState(false);
+
+  const toggleWhatsapp = (value: boolean) => {
+    setWhatsappOptIn(value);
+    // Sync to the server profile so notifications/OTPs mirror to WhatsApp.
+    void api.updateProfile({ whatsappOptIn: value }).catch(() => {});
+  };
 
   const openSheet = () => {
     setOpen(true);
@@ -65,6 +75,20 @@ export function NotificationBell(): React.JSX.Element {
               <Pressable accessibilityRole="button" accessibilityLabel="Close notifications" onPress={close} hitSlop={8}>
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </Pressable>
+            </View>
+            {/* WhatsApp mirror — where these updates actually get read */}
+            <View style={styles.waRow}>
+              <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.waTitle}>Get updates on WhatsApp</Text>
+                <Text style={styles.waSub}>Bids, payments and POD alerts on your number</Text>
+              </View>
+              <Switch
+                value={whatsappOptIn}
+                onValueChange={toggleWhatsapp}
+                trackColor={{ true: '#25D366', false: colors.border }}
+                thumbColor={colors.surface}
+              />
             </View>
             <FlatList
               data={notifications}
@@ -135,6 +159,24 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.lg,
     fontWeight: '800',
     color: colors.textPrimary,
+  },
+  waRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  waTitle: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  waSub: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   empty: {
     textAlign: 'center',

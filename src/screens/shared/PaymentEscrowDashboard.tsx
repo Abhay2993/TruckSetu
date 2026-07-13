@@ -34,7 +34,7 @@ import { RatingStars } from '../../components/RatingStars';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
 import { readConsignmentNo } from '../../services/ocr';
-import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
+import { instantPayoutQuote, splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { EscrowShipment, ProofOfDelivery } from '../../types';
@@ -58,6 +58,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   const attachPod = useEscrowStore((s) => s.attachPod);
   const releaseBalance = useEscrowStore((s) => s.releaseBalance);
   const rateShipment = useEscrowStore((s) => s.rateShipment);
+  const instantPayout = useEscrowStore((s) => s.instantPayout);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -179,6 +180,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
             <Text style={styles.subline}>
               Advance {shipment.advancePercent}% ({formatINR(advanceInr)}) · Balance{' '}
               {formatINR(balanceInr)}
+              {shipment.insured ? ' · 🛡 Insured' : ''}
             </Text>
           </View>
         </View>
@@ -287,7 +289,23 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           )}
 
           {shipment.stage === 'POD_UPLOADED' && role === 'driver' && (
-            <StatusNote icon="shield-checkmark" text="POD uploaded — dealer is verifying. Balance releases from escrow next." />
+            <>
+              <StatusNote icon="shield-checkmark" text="POD uploaded — dealer is verifying. Balance releases from escrow next." />
+              {/* Instant payout (factoring): don't wait for the dealer. */}
+              {!shipment.disputeId && (() => {
+                const quote = instantPayoutQuote(shipment);
+                return (
+                  <ActionButton
+                    label={`Get ${formatINR(quote.netInr)} now`}
+                    caption={`Instant payout · fee ${formatINR(quote.feeInr)} (1.5%) instead of waiting`}
+                    icon="flash"
+                    tone="success"
+                    busy={isProcessing}
+                    onPress={() => void instantPayout(shipment.id)}
+                  />
+                );
+              })()}
+            </>
           )}
 
           {shipment.stage === 'BALANCE_RELEASED' && (

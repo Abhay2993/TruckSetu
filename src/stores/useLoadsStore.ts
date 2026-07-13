@@ -20,6 +20,8 @@ export interface PostLoadInput {
   weightTonnes: number;
   priceInr: number;
   advancePercent: number;
+  /** Goods-in-transit insurance (premium = 0.35% of freight, min ₹99). */
+  insured?: boolean;
 }
 
 interface LoadsState {
@@ -50,6 +52,9 @@ export const useLoadsStore = create<LoadsState>()(
             postedAt: Date.now(),
             // Auto-assign a consignment/LR number so POD OCR has a target.
             consignmentNo: `LR-${Math.floor(10000 + Math.random() * 90000)}`,
+            insurancePremiumInr: input.insured
+              ? Math.max(99, Math.round(input.priceInr * 0.0035))
+              : undefined,
           };
         set((s) => ({ loads: [load, ...s.loads] }));
       },
@@ -80,6 +85,7 @@ export const useLoadsStore = create<LoadsState>()(
           pod: null,
           consignmentNo: load.consignmentNo,
           disputeId: null,
+          insured: load.insured,
           events: [
             {
               stage: 'CREATED',

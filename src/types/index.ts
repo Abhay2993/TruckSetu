@@ -56,6 +56,9 @@ export interface Load {
   postedAt: number;
   /** Consignment / LR number the POD must match (Feature 12). */
   consignmentNo?: string;
+  /** Goods-in-transit insurance opted at posting. */
+  insured?: boolean;
+  insurancePremiumInr?: number;
 }
 
 export interface Bid {
@@ -127,6 +130,10 @@ export interface EscrowShipment {
   consignmentNo?: string;
   /** Open dispute id — blocks balance release while set (Feature 13). */
   disputeId?: string | null;
+  /** Goods-in-transit insurance, inherited from the load. */
+  insured?: boolean;
+  /** Factoring fee retained when the driver took an instant payout. */
+  instantPayoutFeeInr?: number;
 }
 
 // ---------------------------------------------------------------------------

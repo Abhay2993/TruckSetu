@@ -10,6 +10,7 @@
 
 import { db, newId, persist } from './db';
 import { NotificationKind } from './types';
+import { sendWhatsApp } from './whatsapp';
 
 interface NotifyInput {
   userId: string;
@@ -33,6 +34,12 @@ export function notifyUser(input: NotifyInput): void {
   persist();
 
   const user = db.users.find((u) => u.id === input.userId);
+
+  // WhatsApp mirror — where Indian drivers actually read messages.
+  if (user?.whatsappOptIn) {
+    void sendWhatsApp(user.phone, `${input.title}\n${input.body}`);
+  }
+
   const token = user?.pushToken;
   if (!token) return;
 

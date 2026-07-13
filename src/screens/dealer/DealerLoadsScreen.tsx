@@ -8,11 +8,13 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -31,6 +33,21 @@ export function DealerLoadsScreen(): React.JSX.Element {
   const loads = useLoadsStore((s) => s.loads);
   const acceptBid = useLoadsStore((s) => s.acceptBid);
   const [showPostModal, setShowPostModal] = useState(false);
+
+  // WhatsApp broadcast — dealers share loads to driver groups all day; this
+  // pre-fills the message and opens WhatsApp (wa.me works on web too).
+  const shareOnWhatsApp = async (load: Load) => {
+    const text = encodeURIComponent(
+      `🚛 Load available: ${load.origin} → ${load.destination}\n${load.material} · ${load.weightTonnes}T · ₹${load.priceInr} (${load.advancePercent}% advance)\nBid on TruckSetu!`,
+    );
+    const appUrl = `whatsapp://send?text=${text}`;
+    const webUrl = `https://wa.me/?text=${text}`;
+    try {
+      await Linking.openURL(Platform.OS === 'web' ? webUrl : appUrl);
+    } catch {
+      await Linking.openURL(webUrl).catch(() => notify('WhatsApp not found', 'Install WhatsApp to share loads.'));
+    }
+  };
 
   const handleAccept = async (load: Load, bidId: string, driverName: string) => {
     const ok = await confirmAction(
@@ -84,7 +101,18 @@ export function DealerLoadsScreen(): React.JSX.Element {
             <Text style={styles.loadMeta}>
               {load.material} · {load.weightTonnes} T · {formatINR(load.priceInr)} ·{' '}
               {load.advancePercent}% advance · {timeAgo(load.postedAt)}
+              {load.insured ? ' · 🛡 insured' : ''}
             </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share on WhatsApp"
+              onPress={() => void shareOnWhatsApp(load)}
+              style={({ pressed }) => [styles.waShareBtn, pressed && { opacity: 0.8 }]}
+            >
+              <Ionicons name="logo-whatsapp" size={14} color="#25D366" />
+              <Text style={styles.waShareText}>Share on WhatsApp</Text>
+            </Pressable>
 
             {load.status === 'open' && load.bids.length > 0 && (
               <View style={styles.bidsBlock}>
@@ -145,6 +173,12 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
   const [material, setMaterial] = useState('');
   const [weight, setWeight] = useState('');
   const [price, setPrice] = useState('');
+  const [insured, setInsured] = useState(false);
+
+  // Live premium preview: 0.35% of freight, minimum ₹99.
+  const priceNum = Number(price);
+  const premiumInr =
+    Number.isFinite(priceNum) && priceNum > 0 ? Math.max(99, Math.round(priceNum * 0.0035)) : 99;
 
   const submit = async () => {
     const weightTonnes = Number(weight);
@@ -165,6 +199,7 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
         weightTonnes,
         priceInr,
         advancePercent: 70,
+        insured,
       });
     } catch (e) {
       // Server mode: the backend rejected the load — keep the sheet open.
@@ -176,6 +211,7 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
     setMaterial('');
     setWeight('');
     setPrice('');
+    setInsured(false);
     onClose();
   };
 
@@ -230,6 +266,21 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
               keyboardType="numeric"
               value={price}
               onChangeText={setPrice}
+            />
+          </View>
+
+          {/* Per-shipment goods-in-transit insurance */}
+          <View style={styles.insureRow}>
+            <Ionicons name="shield-checkmark" size={18} color={insured ? colors.success : colors.textMuted} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.insureTitle}>Insure this load · {formatINR(premiumInr)}</Text>
+              <Text style={styles.insureSub}>Goods-in-transit cover for the full freight value</Text>
+            </View>
+            <Switch
+              value={insured}
+              onValueChange={setInsured}
+              trackColor={{ true: colors.success, false: colors.border }}
+              thumbColor={colors.surface}
             />
           </View>
 
@@ -367,6 +418,38 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  waShareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#25D366',
+    borderRadius: radii.sm,
+    paddingVertical: 7,
+  },
+  waShareText: {
+    color: '#1DA851',
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+  },
+  insureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+  },
+  insureTitle: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  insureSub: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   modalBackdrop: {
     flex: 1,

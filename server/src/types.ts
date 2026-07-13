@@ -15,6 +15,8 @@ export interface User {
   kycVerified?: boolean;
   /** Expo push token registered by the device. */
   pushToken?: string | null;
+  /** Mirror notifications/OTPs to WhatsApp when true. */
+  whatsappOptIn?: boolean;
   createdAt: number;
 }
 
@@ -52,6 +54,9 @@ export interface Load {
   postedAt: number;
   /** Consignment / LR number the POD must match (OCR verification). */
   consignmentNo?: string;
+  /** Goods-in-transit insurance opted at posting. */
+  insured?: boolean;
+  insurancePremiumInr?: number;
   /** Server-only linkage; the app ignores unknown keys. */
   dealerId?: string;
 }
@@ -98,6 +103,10 @@ export interface EscrowShipment {
   consignmentNo?: string;
   /** Open dispute id, if any — blocks balance release while set. */
   disputeId?: string | null;
+  /** Goods-in-transit insurance, inherited from the load. */
+  insured?: boolean;
+  /** Instant-payout (factoring) fee retained, when the driver cashed out early. */
+  instantPayoutFeeInr?: number;
   dealerId?: string;
   driverId?: string;
 }
@@ -195,6 +204,14 @@ export interface FuelPrice {
   updatedAt: number;
 }
 
+export interface WhatsAppOutboxEntry {
+  id: string;
+  to: string;
+  text: string;
+  mode: 'cloud-api' | 'simulated';
+  at: number;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -206,4 +223,5 @@ export interface DbShape {
   messages: ChatMessage[];
   notifications: Notification[];
   disputes: Dispute[];
+  whatsappOutbox: WhatsAppOutboxEntry[];
 }

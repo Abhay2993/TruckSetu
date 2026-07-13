@@ -49,6 +49,15 @@ interface EscrowState {
   releaseBalance: (shipmentId: string) => Promise<void>;
   /** Two-way rating, legal only after settlement. */
   rateShipment: (shipmentId: string, stars: number, as: 'dealer' | 'driver') => Promise<void>;
+  /** Instant payout (factoring): cash out the escrowed balance for a fee. */
+  instantPayout: (shipmentId: string) => Promise<void>;
+}
+
+/** Factoring fee: 1.5% of the escrowed balance, minimum ₹49. */
+export function instantPayoutQuote(shipment: EscrowShipment): { feeInr: number; netInr: number } {
+  const { balanceInr } = splitAmounts(shipment);
+  const feeInr = Math.max(49, Math.round(balanceInr * 0.015));
+  return { feeInr, netInr: balanceInr - feeInr };
 }
 
 /** Split helper used by both the store and the dashboard UI. */
@@ -217,6 +226,47 @@ export const useEscrowStore = create<EscrowState>()(
               shipmentId,
               'POD_UPLOADED',
               'Balance release failed — tap Release Balance to retry',
+            ),
+          }));
+        } finally {
+          set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
+        }
+      },
+
+      instantPayout: async (shipmentId) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        // Same guards as release: POD in, no open dispute.
+        if (!shipment || shipment.stage !== 'POD_UPLOADED' || shipment.disputeId) return;
+
+        set((s) => ({ processingIds: [...s.processingIds, shipmentId] }));
+        const { feeInr, netInr } = instantPayoutQuote(shipment);
+        try {
+          const remote = await api.instantPayout(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote.shipment, pod: sh.pod ?? remote.shipment.pod } : sh,
+              ),
+            }));
+          } else {
+            set((s) => ({
+              shipments: transition(
+                s.shipments,
+                shipmentId,
+                'BALANCE_RELEASED',
+                `Instant payout: ${netInr} paid now (fee ${feeInr} @ 1.5%)`,
+                { instantPayoutFeeInr: feeInr },
+              ),
+            }));
+          }
+          localNotify('balance_released', 'Instant payout done!', `₹${netInr} paid now (fee ₹${feeInr})`, shipmentId);
+        } catch {
+          set((s) => ({
+            shipments: transition(
+              s.shipments,
+              shipmentId,
+              'POD_UPLOADED',
+              'Instant payout failed — try again',
             ),
           }));
         } finally {
