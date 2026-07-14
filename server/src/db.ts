@@ -120,6 +120,7 @@ function seed(): DbShape {
     notifications: [],
     disputes: [],
     whatsappOutbox: [],
+    fraudAlerts: [],
   };
 }
 
@@ -133,6 +134,7 @@ function load(): DbShape {
     data.notifications = data.notifications ?? [];
     data.disputes = data.disputes ?? [];
     data.whatsappOutbox = data.whatsappOutbox ?? [];
+    data.fraudAlerts = data.fraudAlerts ?? [];
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not

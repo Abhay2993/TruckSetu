@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { api } from '../services/api';
 import { registerForPush } from '../services/push';
+import { disconnectRealtime } from '../services/realtime';
 import { syncFromServer } from '../services/sync';
 import type { AuthUser } from '../types';
 import { useAppStore } from './useAppStore';
@@ -51,6 +52,7 @@ export const useAuthStore = create<AuthState>()(
       },
 
       signOut: () => {
+        disconnectRealtime();
         set({ token: null, user: null });
         useAppStore.getState().setRole(null);
       },

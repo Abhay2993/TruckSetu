@@ -134,6 +134,17 @@ export interface EscrowShipment {
   insured?: boolean;
   /** Factoring fee retained when the driver took an instant payout. */
   instantPayoutFeeInr?: number;
+  /** e-Way bill number, once generated. */
+  ewayBillNumber?: string | null;
+  /** Aadhaar-eSigned digital LR state. */
+  contract?: ShipmentContract | null;
+}
+
+export interface ShipmentContract {
+  /** SHA-256 of the contract text — the tamper-evidence anchor. */
+  textHash: string;
+  signedByDealerAt: number | null;
+  signedByDriverAt: number | null;
 }
 
 // ---------------------------------------------------------------------------

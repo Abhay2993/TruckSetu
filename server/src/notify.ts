@@ -9,6 +9,7 @@
  */
 
 import { db, newId, persist } from './db';
+import { pushEventTo } from './realtime';
 import { NotificationKind } from './types';
 import { sendWhatsApp } from './whatsapp';
 
@@ -32,6 +33,14 @@ export function notifyUser(input: NotifyInput): void {
     read: false,
   });
   persist();
+
+  // Realtime: connected apps get the event instantly over SSE.
+  pushEventTo(input.userId, 'notification', {
+    kind: input.kind,
+    title: input.title,
+    body: input.body,
+    shipmentId: input.shipmentId,
+  });
 
   const user = db.users.find((u) => u.id === input.userId);
 

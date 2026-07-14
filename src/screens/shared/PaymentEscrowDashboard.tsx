@@ -28,6 +28,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChatSheet } from '../../components/ChatSheet';
+import { ContractCard } from '../../components/ContractCard';
 import { DisputePanel } from '../../components/DisputePanel';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
 import { RatingStars } from '../../components/RatingStars';
@@ -377,6 +378,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
             tone="neutral"
             onPress={() => setChatOpen(true)}
           />
+          <ContractCard shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
           <DisputePanel shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
         </View>
 

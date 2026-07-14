@@ -57,7 +57,7 @@ export function buildInvoice(shipment: EscrowShipment): Invoice {
           : 'IN ESCROW',
     advanceInr,
     balanceInr,
-    ewayBillNumber: null,
+    ewayBillNumber: shipment.ewayBillNumber ?? null,
   };
 }
 

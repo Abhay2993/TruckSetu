@@ -28,6 +28,7 @@ import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
 import { PaymentEscrowDashboard } from '../screens/shared/PaymentEscrowDashboard';
 import { registerForPush } from '../services/push';
+import { connectRealtime, disconnectRealtime } from '../services/realtime';
 import { syncFromServer } from '../services/sync';
 import { useAppStore } from '../stores/useAppStore';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -159,12 +160,14 @@ export function RootNavigator(): React.JSX.Element {
   const authHydrated = useAuthStore((s) => s.hasHydrated);
 
   // On a warm start with a stored session, refresh loads/shipments/wallet
-  // from the server (no-op in demo mode).
+  // from the server and open the SSE stream (both no-ops in demo mode).
   useEffect(() => {
     if (authHydrated && token) {
       void syncFromServer();
       void registerForPush();
+      connectRealtime(token);
     }
+    return () => disconnectRealtime();
   }, [authHydrated, token]);
 
   // Hold rendering until both persisted stores rehydrate, otherwise a

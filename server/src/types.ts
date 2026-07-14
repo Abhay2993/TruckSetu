@@ -107,8 +107,30 @@ export interface EscrowShipment {
   insured?: boolean;
   /** Instant-payout (factoring) fee retained, when the driver cashed out early. */
   instantPayoutFeeInr?: number;
+  /** e-Way bill number, once generated (NIC API / simulated). */
+  ewayBillNumber?: string | null;
+  /** Aadhaar-eSigned digital LR/contract state. */
+  contract?: ShipmentContract | null;
   dealerId?: string;
   driverId?: string;
+}
+
+export interface ShipmentContract {
+  /** SHA-256 of the contract text — the tamper-evidence anchor. */
+  textHash: string;
+  signedByDealerAt: number | null;
+  signedByDriverAt: number | null;
+}
+
+export type FraudKind = 'gps_spoof' | 'duplicate_pod' | 'route_deviation';
+
+export interface FraudAlert {
+  id: string;
+  kind: FraudKind;
+  userId: string | null;
+  shipmentId: string | null;
+  detail: string;
+  at: number;
 }
 
 export interface FastagTransaction {
@@ -224,4 +246,5 @@ export interface DbShape {
   notifications: Notification[];
   disputes: Dispute[];
   whatsappOutbox: WhatsAppOutboxEntry[];
+  fraudAlerts: FraudAlert[];
 }

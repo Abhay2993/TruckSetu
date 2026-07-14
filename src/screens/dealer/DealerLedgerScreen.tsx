@@ -47,6 +47,7 @@ function invoiceText(inv: Invoice): string {
 
 export function DealerLedgerScreen(): React.JSX.Element {
   const shipments = useEscrowStore((s) => s.shipments);
+  const generateEwayBill = useEscrowStore((s) => s.generateEwayBill);
   const loads = useLoadsStore((s) => s.loads);
 
   const summary = buildLedgerSummary(shipments);
@@ -135,9 +136,18 @@ export function DealerLedgerScreen(): React.JSX.Element {
                   Freight {formatINR(inv.baseAmountInr)} · GST {formatINR(inv.gstInr)} ·{' '}
                   <Text style={styles.invoiceTotal}>Total {formatINR(inv.totalInr)}</Text>
                 </Text>
-                <Text style={styles.ewayLine}>
-                  E-way bill: {inv.ewayBillNumber ?? 'pending NIC integration'}
-                </Text>
+                {inv.ewayBillNumber ? (
+                  <Text style={styles.ewayLine}>✓ E-way bill: {inv.ewayBillNumber}</Text>
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => void generateEwayBill(inv.shipmentId)}
+                    style={({ pressed }) => [styles.ewbBtn, pressed && { opacity: 0.8 }]}
+                  >
+                    <MaterialCommunityIcons name="qrcode" size={13} color={colors.primary} />
+                    <Text style={styles.ewbBtnText}>Generate e-way bill</Text>
+                  </Pressable>
+                )}
               </View>
               <Pressable
                 accessibilityRole="button"
@@ -278,8 +288,25 @@ const styles = StyleSheet.create({
   },
   ewayLine: {
     fontSize: fontSizes.xs,
-    color: colors.textMuted,
-    fontStyle: 'italic',
+    color: colors.success,
+    fontWeight: '700',
+  },
+  ewbBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  ewbBtnText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    color: colors.primary,
   },
   shareBtn: {
     flexDirection: 'row',

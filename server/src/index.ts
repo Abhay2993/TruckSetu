@@ -9,9 +9,14 @@
 
 import cors from 'cors';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyOtp } from './auth';
+import { contractHash, contractText, generateEwayBill } from './compliance';
 import { db, newId, persist } from './db';
+import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
 import { notifyUser } from './notify';
+import { OPS_CONSOLE_HTML, opsAuthorized } from './ops';
+import { connectedClientCount, pushEventTo, registerSseClient } from './realtime';
 import { buildUpiIntent, executePayout, paymentsMode, verifyWebhookSignature } from './payments';
 import {
   parseLoadMessage,
@@ -98,7 +103,25 @@ function applyAutoRecharge(w: FastagWallet): void {
 // ---------------------------------------------------------------------------
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'trucksetu-server', dev: IS_DEV });
+  res.json({ ok: true, service: 'trucksetu-server', dev: IS_DEV, sseClients: connectedClientCount() });
+});
+
+// ---------------------------------------------------------------------------
+// Realtime (SSE). EventSource can't set headers, so the JWT rides a query
+// param; verified the same way as the Authorization header.
+// ---------------------------------------------------------------------------
+
+app.get('/v1/events', (req, res) => {
+  const token = typeof req.query.token === 'string' ? req.query.token : '';
+  try {
+    const payload = jwt.verify(
+      token,
+      process.env.JWT_SECRET ?? 'trucksetu-dev-secret-change-me',
+    ) as { sub: string };
+    registerSseClient(payload.sub, res);
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
 });
 
 app.post('/v1/auth/otp/request', (req, res) => {
@@ -405,6 +428,8 @@ app.post('/v1/shipments/:id/pod', requireAuth, (req, res) => {
         : `POD uploaded (${fileName})`,
   );
   persist();
+  // Fraud screening: the same POD reused across shipments.
+  checkPodDuplicate(shipment);
   if (shipment.dealerId) {
     notifyUser({
       userId: shipment.dealerId,
@@ -511,6 +536,110 @@ app.post('/v1/shipments/:id/instant-payout', requireAuth, async (req, res) => {
   res.json({ shipment, feeInr, netInr });
 });
 
+// ---------------------------------------------------------------------------
+// Compliance: e-Way bill, GSTR-1 summary, Aadhaar-eSigned contracts
+// ---------------------------------------------------------------------------
+
+app.post('/v1/shipments/:id/ewaybill', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  if (shipment.ewayBillNumber) {
+    res.json({ shipment, ewayBillNumber: shipment.ewayBillNumber });
+    return;
+  }
+  const { ewayBillNumber, validUntil, mode } = generateEwayBill(shipment);
+  shipment.ewayBillNumber = ewayBillNumber;
+  pushEvent(shipment, `e-Way bill generated: ${ewayBillNumber} (${mode})`);
+  persist();
+  res.json({ shipment, ewayBillNumber, validUntil, mode });
+});
+
+/** GSTR-1 shaped summary of the month's invoices for filing/export. */
+app.get('/v1/gst/gstr1', requireAuth, (_req, res) => {
+  const GST_RATE = 0.05;
+  const rows = db.shipments.map((s) => ({
+    invoiceNo: `TS-INV-${s.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`,
+    date: s.events[0]?.at ?? Date.now(),
+    route: `${s.origin} → ${s.destination}`,
+    taxableValueInr: s.totalAmountInr,
+    gstInr: Math.round(s.totalAmountInr * GST_RATE),
+    ewayBillNumber: s.ewayBillNumber ?? null,
+    status: s.stage === 'BALANCE_RELEASED' ? 'PAID' : 'OUTSTANDING',
+  }));
+  res.json({
+    period: new Date().toISOString().slice(0, 7),
+    gstRate: GST_RATE,
+    invoiceCount: rows.length,
+    taxableValueInr: rows.reduce((a, r) => a + r.taxableValueInr, 0),
+    gstInr: rows.reduce((a, r) => a + r.gstInr, 0),
+    rows,
+  });
+});
+
+app.get('/v1/shipments/:id/contract', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  res.json({
+    text: contractText(shipment),
+    hash: contractHash(shipment),
+    contract: shipment.contract ?? null,
+  });
+});
+
+/**
+ * Aadhaar eSign (dev stand-in): production redirects to NSDL/Protean's
+ * eSign flow (Aadhaar OTP at the provider, signature returned in the
+ * callback). Dev accepts any 6-digit OTP so the two-party flow is testable.
+ */
+app.post('/v1/shipments/:id/contract/sign', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  const as = req.body?.as;
+  const otp = typeof req.body?.otp === 'string' ? req.body.otp.trim() : '';
+  if ((as !== 'dealer' && as !== 'driver') || !/^\d{6}$/.test(otp)) {
+    res.status(400).json({ error: "as (dealer|driver) and a 6-digit Aadhaar OTP are required." });
+    return;
+  }
+  if (!IS_DEV) {
+    res.status(501).json({ error: 'Aadhaar eSign provider integration pending — see compliance.ts.' });
+    return;
+  }
+  const hash = contractHash(shipment);
+  const contract = shipment.contract ?? { textHash: hash, signedByDealerAt: null, signedByDriverAt: null };
+  if (contract.textHash !== hash) {
+    res.status(409).json({ error: 'Contract text changed since first signature — re-issue required.' });
+    return;
+  }
+  if (as === 'dealer') contract.signedByDealerAt = contract.signedByDealerAt ?? Date.now();
+  else contract.signedByDriverAt = contract.signedByDriverAt ?? Date.now();
+  shipment.contract = contract;
+  const fully = contract.signedByDealerAt && contract.signedByDriverAt;
+  pushEvent(shipment, fully ? `Contract fully signed (sha256 ${hash.slice(0, 12)}…)` : `Contract signed by ${as}`);
+  persist();
+
+  const counterpartId = as === 'dealer' ? shipment.driverId : shipment.dealerId;
+  if (counterpartId && counterpartId !== user.id) {
+    notifyUser({
+      userId: counterpartId,
+      kind: 'message',
+      title: 'Contract signed',
+      body: `${shipment.origin} → ${shipment.destination}: ${as} signed the digital LR.`,
+      shipmentId: shipment.id,
+    });
+  }
+  res.json({ shipment, contract });
+});
+
 app.post('/v1/shipments/:id/rate', requireAuth, (req, res) => {
   const shipment = db.shipments.find((s) => s.id === req.params.id);
   if (!shipment) {
@@ -576,6 +705,8 @@ app.post('/v1/telemetry/batch', requireAuth, (req, res) => {
   db.telemetry.lastSyncAt = syncedAt;
   db.telemetry.lastPoint = points[points.length - 1] ?? db.telemetry.lastPoint;
   persist();
+  // Fraud screening: impossible speeds and corridor deviation.
+  checkTelemetryBatch(points, (req as AuthedRequest).user.id);
   res.json({ syncedCount: points.length, syncedAt });
 });
 
@@ -744,6 +875,8 @@ app.post('/v1/shipments/:id/messages', requireAuth, (req, res) => {
 
   const counterpartId = role === 'dealer' ? shipment.driverId : shipment.dealerId;
   if (counterpartId && counterpartId !== user.id) {
+    // Live chat: deliver the message itself over SSE, then the notification.
+    pushEventTo(counterpartId, 'message', message);
     notifyUser({
       userId: counterpartId,
       kind: 'message',
@@ -1067,6 +1200,88 @@ app.post('/v1/payments/webhook', (req, res) => {
   // FASTag wallet / mark escrow funded; payout.processed → confirm the
   // driver payout landed. Foundation logs and acknowledges.
   console.log(`[webhook] verified event: ${event.event ?? 'unknown'}`);
+  res.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Ops console: HTML desk + summary + action endpoints, guarded by OPS_KEY.
+// ---------------------------------------------------------------------------
+
+app.get('/ops', (req, res) => {
+  if (!opsAuthorized(req)) {
+    res.status(401).send('Add ?key=<OPS_KEY> to the URL.');
+    return;
+  }
+  res.type('html').send(OPS_CONSOLE_HTML);
+});
+
+app.get('/v1/ops/summary', (req, res) => {
+  if (!opsAuthorized(req)) {
+    res.status(401).json({ error: 'Bad ops key.' });
+    return;
+  }
+  res.json({
+    sseClients: connectedClientCount(),
+    userCount: db.users.length,
+    sos: db.sosAlerts.filter((a) => a.resolvedAt === null),
+    disputes: db.disputes.filter((d) => d.status !== 'resolved'),
+    fraud: db.fraudAlerts.slice(0, 20),
+    kycPending: db.users.filter((u) => !u.kycVerified).map((u) => ({
+      id: u.id,
+      phone: u.phone,
+      name: u.name,
+      role: u.role,
+    })),
+    whatsapp: db.whatsappOutbox.slice(0, 10),
+  });
+});
+
+app.post('/v1/ops/sos/:id/resolve', (req, res) => {
+  if (!opsAuthorized(req)) {
+    res.status(401).json({ error: 'Bad ops key.' });
+    return;
+  }
+  const alert = db.sosAlerts.find((a) => a.id === req.params.id);
+  if (alert) {
+    alert.resolvedAt = alert.resolvedAt ?? Date.now();
+    persist();
+  }
+  res.json({ ok: true });
+});
+
+app.post('/v1/ops/disputes/:id/resolve', (req, res) => {
+  if (!opsAuthorized(req)) {
+    res.status(401).json({ error: 'Bad ops key.' });
+    return;
+  }
+  const dispute = db.disputes.find((d) => d.id === req.params.id);
+  const resolution = req.query.resolution;
+  if (!dispute || !['released', 'refunded', 'partial', 'dismissed'].includes(String(resolution))) {
+    res.status(400).json({ error: 'Unknown dispute or resolution.' });
+    return;
+  }
+  dispute.status = 'resolved';
+  dispute.resolution = resolution as Dispute['resolution'];
+  dispute.resolvedAt = Date.now();
+  const shipment = db.shipments.find((s) => s.id === dispute.shipmentId);
+  if (shipment) {
+    shipment.disputeId = null;
+    pushEvent(shipment, `Dispute resolved by ops: ${String(resolution)}`);
+  }
+  persist();
+  res.json({ ok: true });
+});
+
+app.post('/v1/ops/kyc/:userId/verify', (req, res) => {
+  if (!opsAuthorized(req)) {
+    res.status(401).json({ error: 'Bad ops key.' });
+    return;
+  }
+  const user = db.users.find((u) => u.id === req.params.userId);
+  if (user) {
+    user.kycVerified = true;
+    persist();
+  }
   res.json({ ok: true });
 });
 

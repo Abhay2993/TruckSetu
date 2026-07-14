@@ -233,6 +233,30 @@ export const api = {
     );
   },
 
+  /** Generate (or fetch the existing) e-Way bill for a shipment. */
+  async generateEwayBill(shipmentId: string): Promise<EscrowShipment | null> {
+    if (!isServerMode) return null;
+    const { shipment } = await request<{ shipment: EscrowShipment }>(
+      `/v1/shipments/${shipmentId}/ewaybill`,
+      { method: 'POST' },
+    );
+    return shipment;
+  },
+
+  /** Aadhaar eSign the digital LR (dev: any 6-digit OTP). */
+  async signContract(
+    shipmentId: string,
+    as: 'dealer' | 'driver',
+    otp: string,
+  ): Promise<EscrowShipment | null> {
+    if (!isServerMode) return null;
+    const { shipment } = await request<{ shipment: EscrowShipment }>(
+      `/v1/shipments/${shipmentId}/contract/sign`,
+      { method: 'POST', body: { as, otp } },
+    );
+    return shipment;
+  },
+
   /** Two-way rating on a settled shipment. */
   async rateShipment(
     shipmentId: string,

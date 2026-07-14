@@ -51,6 +51,10 @@ interface EscrowState {
   rateShipment: (shipmentId: string, stars: number, as: 'dealer' | 'driver') => Promise<void>;
   /** Instant payout (factoring): cash out the escrowed balance for a fee. */
   instantPayout: (shipmentId: string) => Promise<void>;
+  /** Generate the e-Way bill (NIC API in production; simulated locally). */
+  generateEwayBill: (shipmentId: string) => Promise<void>;
+  /** Aadhaar eSign the digital LR for one party (dev OTP accepted). */
+  signContract: (shipmentId: string, as: 'dealer' | 'driver', otp: string) => Promise<void>;
 }
 
 /** Factoring fee: 1.5% of the escrowed balance, minimum ₹49. */
@@ -272,6 +276,59 @@ export const useEscrowStore = create<EscrowState>()(
         } finally {
           set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
         }
+      },
+
+      generateEwayBill: async (shipmentId) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment || shipment.ewayBillNumber) return;
+        const remote = await api.generateEwayBill(shipmentId).catch(() => null);
+        if (remote) {
+          set((s) => ({
+            shipments: s.shipments.map((sh) =>
+              sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+            ),
+          }));
+          return;
+        }
+        // Demo mode: simulated 12-digit EBN, same shape as the NIC rule.
+        const ebn = String(1e11 + Math.floor(Math.random() * 9e11)).slice(0, 12);
+        set((s) => ({
+          shipments: transition(s.shipments, shipmentId, shipment.stage, `e-Way bill generated: ${ebn} (simulated)`, {
+            ewayBillNumber: ebn,
+          }),
+        }));
+      },
+
+      signContract: async (shipmentId, as, otp) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment || !/^\d{6}$/.test(otp)) return;
+        const remote = await api.signContract(shipmentId, as, otp).catch(() => null);
+        if (remote) {
+          set((s) => ({
+            shipments: s.shipments.map((sh) =>
+              sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+            ),
+          }));
+          return;
+        }
+        // Demo mode: apply the identical signature transition locally.
+        const field = as === 'dealer' ? 'signedByDealerAt' : 'signedByDriverAt';
+        const contract = shipment.contract ?? {
+          textHash: `demo-${shipmentId}`,
+          signedByDealerAt: null,
+          signedByDriverAt: null,
+        };
+        const next = { ...contract, [field]: contract[field] ?? Date.now() };
+        const fully = next.signedByDealerAt && next.signedByDriverAt;
+        set((s) => ({
+          shipments: transition(
+            s.shipments,
+            shipmentId,
+            shipment.stage,
+            fully ? 'Contract fully signed (digital LR)' : `Contract signed by ${as}`,
+            { contract: next },
+          ),
+        }));
       },
 
       rateShipment: async (shipmentId, stars, as) => {
