@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { IndianTruck } from '../../components/IndianTruck';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
 import { computeTruckScore } from '../../services/creditScore';
@@ -129,7 +130,10 @@ export function DriverTripsScreen(): React.JSX.Element {
         })}
 
         {shipments.length === 0 && (
-          <Text style={styles.emptyText}>No trips yet — accepted loads appear here.</Text>
+          <View style={styles.emptyBox}>
+            <IndianTruck width={180} />
+            <Text style={styles.emptyText}>No trips yet — accepted loads appear here.</Text>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -268,10 +272,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.warning,
   },
+  emptyBox: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+  },
   emptyText: {
     textAlign: 'center',
     color: colors.textMuted,
     fontSize: fontSizes.sm,
-    paddingVertical: spacing.xl,
   },
 });

@@ -29,6 +29,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChatSheet } from '../../components/ChatSheet';
 import { ContractCard } from '../../components/ContractCard';
+import { IndianTruck } from '../../components/IndianTruck';
 import { DisputePanel } from '../../components/DisputePanel';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
 import { RatingStars } from '../../components/RatingStars';
@@ -126,7 +127,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScreenHeader />
         <View style={styles.empty}>
-          <Ionicons name="wallet-outline" size={40} color={colors.textMuted} />
+          <IndianTruck width={190} />
           <Text style={styles.emptyText}>No shipments yet. Book a load to start an escrow.</Text>
         </View>
       </SafeAreaView>

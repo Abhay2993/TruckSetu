@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { IndianTruck } from '../../components/IndianTruck';
 import { RouteMap } from '../../components/RouteMap';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { buildLedgerSummary } from '../../services/invoices';
@@ -110,7 +111,7 @@ export function DealerShipmentsScreen(): React.JSX.Element {
 
         {shipments.length === 0 && (
           <View style={styles.empty}>
-            <Ionicons name="cube-outline" size={36} color={colors.textMuted} />
+            <IndianTruck width={180} />
             <Text style={styles.emptyText}>Accept a bid on the Loads tab to start a shipment.</Text>
           </View>
         )}

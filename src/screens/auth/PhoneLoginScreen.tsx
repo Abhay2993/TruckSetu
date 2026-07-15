@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DynamicHeader } from '../../components/DynamicHeader';
+import { TruckHero } from '../../components/TruckHero';
 import { useTranslation } from '../../i18n/i18n';
 import { ApiError } from '../../services/http';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -91,6 +92,10 @@ export function PhoneLoginScreen(): React.JSX.Element {
           <View style={styles.brand}>
             <DynamicHeader size="display" prefixColor={colors.textInverse} />
             <Text style={styles.tagline}>{t('appTagline')}</Text>
+          </View>
+
+          <View style={styles.hero}>
+            <TruckHero height={196} />
           </View>
 
           <View style={styles.card}>
@@ -215,6 +220,11 @@ const styles = StyleSheet.create({
   brand: {
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  hero: {
+    // Full-bleed: the road should run edge to edge under the padded card.
+    marginHorizontal: -spacing.xl,
+    marginVertical: -spacing.sm,
   },
   tagline: {
     color: colors.textInverse,
