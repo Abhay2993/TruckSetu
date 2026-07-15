@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ArtTrim } from '../../components/ArtTrim';
 import { IndianTruck } from '../../components/IndianTruck';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
@@ -79,6 +80,7 @@ export function DriverTripsScreen(): React.JSX.Element {
             </View>
             <Text style={styles.scoreValue}>{truckScore.score}</Text>
           </View>
+          <ArtTrim height={6} opacity={0.85} />
           <View style={styles.scoreFactors}>
             {truckScore.factors.map((f) => (
               <View key={f.label} style={styles.factorChip}>

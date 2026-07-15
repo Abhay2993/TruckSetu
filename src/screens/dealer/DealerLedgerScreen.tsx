@@ -9,9 +9,12 @@
  */
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ArtTrim } from '../../components/ArtTrim';
+import { IndianTruck } from '../../components/IndianTruck';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import {
   buildInvoice,
@@ -68,8 +71,17 @@ export function DealerLedgerScreen(): React.JSX.Element {
       <ScreenHeader />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Monthly position */}
-        <View style={styles.summaryCard}>
+        <LinearGradient
+          colors={[colors.primary, colors.primaryDark]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.summaryCard}
+        >
+          <View style={styles.summaryWatermark} pointerEvents="none">
+            <IndianTruck width={180} shadow={false} />
+          </View>
           <Text style={styles.summaryTitle}>This month</Text>
+          <ArtTrim height={6} opacity={0.9} />
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Freight ({summary.shipmentCount} shipments)</Text>
             <Text style={styles.summaryValue}>{formatINR(summary.freightInr)}</Text>
@@ -90,7 +102,7 @@ export function DealerLedgerScreen(): React.JSX.Element {
               {formatINR(summary.inEscrowInr)}
             </Text>
           </View>
-        </View>
+        </LinearGradient>
 
         {/* Lane-rate analytics */}
         <Text style={styles.sectionTitle}>Lane rates · last 30 days</Text>
@@ -176,11 +188,17 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   summaryCard: {
-    backgroundColor: colors.primary,
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.sm,
+    overflow: 'hidden',
     ...cardShadow,
+  },
+  summaryWatermark: {
+    position: 'absolute',
+    right: -30,
+    bottom: -8,
+    opacity: 0.09,
   },
   summaryTitle: {
     color: colors.textInverse,

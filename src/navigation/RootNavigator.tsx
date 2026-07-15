@@ -62,7 +62,15 @@ const tabScreenOptions = {
   headerShown: false,
   tabBarActiveTintColor: colors.accent,
   tabBarInactiveTintColor: colors.textMuted,
-  tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
+  tabBarStyle: {
+    backgroundColor: colors.surface,
+    borderTopWidth: 0,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 14,
+  },
   tabBarLabelStyle: { fontWeight: '700' as const },
 };
 

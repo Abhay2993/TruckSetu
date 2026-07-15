@@ -8,7 +8,9 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import Svg, { Line, Path, Rect } from 'react-native-svg';
 import { useTranslation } from '../i18n/i18n';
+import { IndianTruck } from './IndianTruck';
 import { api } from '../services/api';
 import { LOW_BALANCE_THRESHOLD_INR, useFastagStore } from '../stores/useFastagStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../theme';
@@ -74,12 +76,38 @@ export function FastagCard(): React.JSX.Element {
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
+      {/* Watermark lorry — gives the wallet the feel of a real NETC card */}
+      <View style={styles.watermark} pointerEvents="none">
+        <IndianTruck width={170} shadow={false} />
+      </View>
+
       <View style={styles.headerRow}>
         <View style={styles.titleRow}>
           <MaterialCommunityIcons name="boom-gate" size={18} color={colors.textInverse} />
           <Text style={styles.title}>{t('fastagBalance')}</Text>
         </View>
-        <Ionicons name="wallet" size={18} color={colors.textInverse} />
+        <Text style={styles.netcLabel}>NETC · FASTag</Text>
+      </View>
+
+      {/* EMV chip + contactless waves */}
+      <View style={styles.chipRow}>
+        <Svg width={38} height={28} viewBox="0 0 38 28">
+          <Rect x={1} y={1} width={36} height={26} rx={5} fill="#E8C15A" stroke="#C9A23B" strokeWidth={1.5} />
+          <Line x1={13} y1={1} x2={13} y2={27} stroke="#C9A23B" strokeWidth={1.2} />
+          <Line x1={25} y1={1} x2={25} y2={27} stroke="#C9A23B" strokeWidth={1.2} />
+          <Line x1={1} y1={14} x2={37} y2={14} stroke="#C9A23B" strokeWidth={1.2} />
+        </Svg>
+        <Svg width={26} height={26} viewBox="0 0 26 26">
+          {[4, 9, 14].map((r) => (
+            <Path
+              key={r}
+              d={`M ${8 + r * 0.2} ${13 - r} A ${r} ${r} 0 0 1 ${8 + r * 0.2} ${13 + r}`}
+              stroke="rgba(255,255,255,0.75)"
+              strokeWidth={2}
+              fill="none"
+            />
+          ))}
+        </Svg>
       </View>
 
       <Text style={styles.balance}>{formatINR(balanceInr)}</Text>
@@ -164,7 +192,27 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.sm,
+    overflow: 'hidden',
     ...cardShadow,
+  },
+  watermark: {
+    position: 'absolute',
+    right: -26,
+    top: 6,
+    opacity: 0.1,
+  },
+  netcLabel: {
+    color: colors.textInverse,
+    opacity: 0.7,
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 2,
   },
   headerRow: {
     flexDirection: 'row',

@@ -16,7 +16,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -27,9 +27,11 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Celebration } from '../../components/Celebration';
 import { ChatSheet } from '../../components/ChatSheet';
 import { ContractCard } from '../../components/ContractCard';
 import { IndianTruck } from '../../components/IndianTruck';
+import { TruckProgress } from '../../components/TruckProgress';
 import { DisputePanel } from '../../components/DisputePanel';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
 import { RatingStars } from '../../components/RatingStars';
@@ -68,6 +70,25 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
     () => shipments.find((s) => s.id === selectedId) ?? shipments[0],
     [shipments, selectedId],
   );
+
+  // Confetti when the selected shipment fully settles. Keyed by shipment id
+  // so switching between shipments in the picker never fires a false burst.
+  const [burst, setBurst] = useState(0);
+  const prevRef = useRef<{ id: string; stage: string } | null>(null);
+  useEffect(() => {
+    if (shipment) {
+      const prev = prevRef.current;
+      if (
+        prev &&
+        prev.id === shipment.id &&
+        prev.stage !== 'BALANCE_RELEASED' &&
+        shipment.stage === 'BALANCE_RELEASED'
+      ) {
+        setBurst((b) => b + 1);
+      }
+      prevRef.current = { id: shipment.id, stage: shipment.stage };
+    }
+  }, [shipment]);
 
   // ---- POD capture (driver) ----------------------------------------------
   // Both pickers funnel into one attach path. Before attaching, OCR reads the
@@ -140,6 +161,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader />
+      <Celebration burst={burst} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Shipment picker */}
         {shipments.length > 1 && (
@@ -185,6 +207,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
               {shipment.insured ? ' · 🛡 Insured' : ''}
             </Text>
           </View>
+          <TruckProgress shipment={shipment} />
         </View>
 
         {/* Stage 1 → escrow → release pipeline */}

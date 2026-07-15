@@ -12,6 +12,7 @@ import { useAppStore } from '../stores/useAppStore';
 import { useAuthStore } from '../stores/useAuthStore';
 import { colors, fontSizes, radii, spacing } from '../theme';
 import { confirmAction } from '../utils/dialog';
+import { ArtTrim } from './ArtTrim';
 import { DynamicHeader } from './DynamicHeader';
 import { NotificationBell } from './NotificationBell';
 
@@ -36,8 +37,9 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
   };
 
   return (
-    <View style={styles.container}>
-      <DynamicHeader size="compact" />
+    <View style={styles.shell}>
+      <View style={styles.container}>
+        <DynamicHeader size="compact" />
       <View style={styles.right}>
         {isOnline !== undefined && (
           <View
@@ -75,12 +77,24 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
         >
           <Ionicons name="log-out-outline" size={18} color={colors.textSecondary} />
         </Pressable>
+        </View>
       </View>
+      {/* Signature lorry-art bunting under every header */}
+      <ArtTrim height={7} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: {
+    backgroundColor: colors.surface,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+    zIndex: 2,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -88,8 +102,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   right: {
     flexDirection: 'row',
