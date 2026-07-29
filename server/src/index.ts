@@ -13,7 +13,22 @@ import jwt from 'jsonwebtoken';
 import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyOtp } from './auth';
 import { contractHash, contractText, generateEwayBill } from './compliance';
 import { db, newId, persist } from './db';
+import {
+  PortalInvoice,
+  reconcile,
+  assessTds,
+  toSapFlatFile,
+  toTallyXml,
+  toZohoBooks,
+} from './accounting';
+import {
+  DETENTION,
+  outstandingDetention,
+  recordGeofenceEvents,
+  stampDetention,
+} from './detention';
 import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
+import { chainHead, genesisEvent, linkEvent, sealChain, verifyChain } from './ledger';
 import {
   activeGuaranteeFor,
   buildChain,
@@ -92,8 +107,15 @@ function splitAmounts(s: EscrowShipment): { advanceInr: number; balanceInr: numb
   return { advanceInr, balanceInr: s.totalAmountInr - advanceInr };
 }
 
+/**
+ * Append a trip event, hash-chained to the one before it. Every mutation
+ * path goes through here, so the tamper-evident ledger is built by
+ * construction rather than reconstructed later.
+ */
 function pushEvent(s: EscrowShipment, label: string): void {
-  s.events.push({ stage: s.stage, label, at: Date.now() });
+  const entry = { stage: s.stage, label, at: Date.now() };
+  const { prevHash, hash } = linkEvent(s, entry);
+  s.events.push({ ...entry, prevHash, hash });
 }
 
 function wallet(userId: string): FastagWallet {
@@ -352,11 +374,9 @@ app.post('/v1/loads/:loadId/bids/:bidId/accept', requireAuth, (req, res) => {
     dealerId: user.id,
     driverId: bid.driverId,
   };
-  shipment.events.push({
-    stage: 'CREATED',
-    label: `Bid accepted — ${bid.driverName} (${bid.truckNumber})`,
-    at: Date.now(),
-  });
+  shipment.events.push(
+    genesisEvent('CREATED', `Bid accepted — ${bid.driverName} (${bid.truckNumber})`),
+  );
   db.shipments.unshift(shipment);
   persist();
   if (bid.driverId) {
@@ -617,15 +637,22 @@ app.post('/v1/shipments/:id/ewaybill', requireAuth, (req, res) => {
 /** GSTR-1 shaped summary of the month's invoices for filing/export. */
 app.get('/v1/gst/gstr1', requireAuth, (_req, res) => {
   const GST_RATE = 0.05;
-  const rows = db.shipments.map((s) => ({
-    invoiceNo: `TS-INV-${s.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`,
-    date: s.events[0]?.at ?? Date.now(),
-    route: `${s.origin} → ${s.destination}`,
-    taxableValueInr: s.totalAmountInr,
-    gstInr: Math.round(s.totalAmountInr * GST_RATE),
-    ewayBillNumber: s.ewayBillNumber ?? null,
-    status: s.stage === 'BALANCE_RELEASED' ? 'PAID' : 'OUTSTANDING',
-  }));
+  const rows = db.shipments.map((s) => {
+    // Detention is freight income too — it belongs in the taxable value.
+    const detentionInr = s.detention?.chargeInr ?? 0;
+    const taxableValueInr = s.totalAmountInr + detentionInr;
+    return {
+      invoiceNo: `TS-INV-${s.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`,
+      date: s.events[0]?.at ?? Date.now(),
+      route: `${s.origin} → ${s.destination}`,
+      freightInr: s.totalAmountInr,
+      detentionInr,
+      taxableValueInr,
+      gstInr: Math.round(taxableValueInr * GST_RATE),
+      ewayBillNumber: s.ewayBillNumber ?? null,
+      status: s.stage === 'BALANCE_RELEASED' ? 'PAID' : 'OUTSTANDING',
+    };
+  });
   res.json({
     period: new Date().toISOString().slice(0, 7),
     gstRate: GST_RATE,
@@ -767,6 +794,15 @@ app.post('/v1/telemetry/batch', requireAuth, (req, res) => {
   checkTelemetryBatch(points, userId);
   // Safety scoring: the input to telemetry-priced insurance.
   recordDrivingPoints(userId, points);
+  // Detention: fold geofence crossings into the driver's live shipments, so
+  // waiting time is evidenced as it happens rather than argued afterwards.
+  const active = db.shipments.filter(
+    (s) => s.driverId === userId && s.stage !== 'BALANCE_RELEASED',
+  );
+  for (const shipment of active) {
+    shipment.detention = recordGeofenceEvents(shipment, points);
+  }
+  if (active.length > 0) persist();
   res.json({ syncedCount: points.length, syncedAt });
 });
 
@@ -1268,6 +1304,164 @@ app.post('/v1/payments/webhook', (req, res) => {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// System of record: detention billing, the tamper-evident ledger, GST
+// reconciliation and ERP export. Individually useful; together they mean a
+// dealer's disputes, taxes and payments are all settled by TruckSetu's
+// records — and leaving means losing that history.
+// ---------------------------------------------------------------------------
+
+/** Detention/demurrage state for a shipment, with the terms applied. */
+app.get('/v1/shipments/:id/detention', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  res.json({
+    detention: shipment.detention ?? null,
+    terms: {
+      freeHours: DETENTION.FREE_HOURS,
+      rateInrPerHour: DETENTION.RATE_INR_PER_HOUR,
+      maxInrPerStop: DETENTION.MAX_INR_PER_STOP,
+      geofenceKm: DETENTION.GEOFENCE_KM,
+    },
+  });
+});
+
+/** Stamp an arrival/departure the GPS missed (driver tap or ops correction). */
+app.post('/v1/shipments/:id/detention/stamp', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  const stop = req.body?.stop;
+  const event = req.body?.event;
+  const at = Number(req.body?.at ?? Date.now());
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  if ((stop !== 'origin' && stop !== 'destination') || (event !== 'arrived' && event !== 'departed')) {
+    res.status(400).json({ error: "stop must be origin|destination and event arrived|departed." });
+    return;
+  }
+  if (!Number.isFinite(at)) {
+    res.status(400).json({ error: 'at must be a timestamp.' });
+    return;
+  }
+  const detention = stampDetention(shipment, stop, event, at);
+  pushEvent(shipment, `${stop === 'origin' ? 'Loading' : 'Unloading'} ${event} recorded`);
+  if (detention.chargeInr > 0) {
+    pushEvent(shipment, `Detention accrued: ₹${detention.chargeInr}`);
+  }
+  persist();
+  res.json({ detention });
+});
+
+/** Settle the detention charge — it rides on the invoice from here. */
+app.post('/v1/shipments/:id/detention/settle', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment?.detention || shipment.detention.chargeInr <= 0) {
+    res.status(409).json({ error: 'No detention charge on this shipment.' });
+    return;
+  }
+  shipment.detention.settled = true;
+  pushEvent(shipment, `Detention settled: ₹${shipment.detention.chargeInr}`);
+  persist();
+  res.json({ detention: shipment.detention });
+});
+
+app.get('/v1/detention/outstanding', requireAuth, (_req, res) => {
+  res.json({ outstanding: outstandingDetention() });
+});
+
+/**
+ * Verify the trip ledger. Anyone holding the shipment id can recompute the
+ * chain and see whether the record has been altered.
+ */
+app.get('/v1/shipments/:id/ledger', requireAuth, (req, res) => {
+  const shipment = db.shipments.find((s) => s.id === req.params.id);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  // Seal any pre-chaining events so legacy records become verifiable.
+  sealChain(shipment);
+  persist();
+  res.json({
+    verification: verifyChain(shipment),
+    headHash: chainHead(shipment),
+    events: shipment.events,
+  });
+});
+
+/**
+ * GSTR-2A/2B reconciliation. The portal extract is posted in (that is how
+ * every reconciliation tool works — you download from the GST portal and
+ * feed it in); matching, ITC and the follow-up list come back.
+ */
+app.post('/v1/gst/reconcile', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const raw: unknown = req.body?.portalInvoices;
+  if (!Array.isArray(raw)) {
+    res.status(400).json({ error: 'portalInvoices must be an array of {invoiceNo, taxableValueInr, gstInr}.' });
+    return;
+  }
+  const portalInvoices: PortalInvoice[] = [];
+  for (const item of raw) {
+    const row = item as Partial<PortalInvoice>;
+    if (
+      typeof row.invoiceNo !== 'string' ||
+      !Number.isFinite(Number(row.taxableValueInr)) ||
+      !Number.isFinite(Number(row.gstInr))
+    ) {
+      res.status(400).json({ error: 'Each portal invoice needs invoiceNo, taxableValueInr, gstInr.' });
+      return;
+    }
+    portalInvoices.push({
+      invoiceNo: row.invoiceNo,
+      taxableValueInr: Number(row.taxableValueInr),
+      gstInr: Number(row.gstInr),
+    });
+  }
+  const treatment = req.body?.treatment === 'forward_charge' ? 'forward_charge' : 'reverse_charge';
+  res.json(reconcile(user.id, portalInvoices, treatment));
+});
+
+/** TDS under 194C for a freight payment, including the small-fleet exemption. */
+app.post('/v1/gst/tds', requireAuth, (req, res) => {
+  const paymentInr = Number(req.body?.paymentInr);
+  const annualPaidInr = Number(req.body?.annualPaidInr ?? 0);
+  if (!Number.isFinite(paymentInr) || paymentInr <= 0) {
+    res.status(400).json({ error: 'paymentInr must be a positive number.' });
+    return;
+  }
+  res.json(
+    assessTds(paymentInr, Number.isFinite(annualPaidInr) ? annualPaidInr : 0, {
+      smallFleetDeclaration: req.body?.smallFleetDeclaration === true,
+      payeeIsIndividual: req.body?.payeeIsIndividual !== false,
+    }),
+  );
+});
+
+/** ERP export: Tally XML, Zoho Books JSON, or an SAP posting file. */
+app.get('/v1/accounting/export', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const format = req.query.format;
+  const mine = db.shipments.filter((s) => s.dealerId === user.id);
+  if (format === 'tally') {
+    res.type('application/xml').send(toTallyXml(mine));
+    return;
+  }
+  if (format === 'zoho') {
+    res.json(toZohoBooks(mine));
+    return;
+  }
+  if (format === 'sap') {
+    res.type('text/plain').send(toSapFlatFile(mine));
+    return;
+  }
+  res.status(400).json({ error: 'format must be tally, zoho or sap.' });
+});
+
+// ---------------------------------------------------------------------------
 // Marketplace — network effects. Every endpoint here returns better numbers
 // as liquidity grows, which is the point: the mechanics are copyable, the
 // density that makes them work is not.
@@ -1393,11 +1587,10 @@ app.post('/v1/market/chain', requireAuth, (req, res) => {
       chainLeg: i + 1,
       chainLegs: quote.legs.length,
       events: [
-        {
-          stage: 'CREATED',
-          label: `Chained trip leg ${i + 1}/${quote.legs.length} — ${load.origin} → ${load.destination}`,
-          at: Date.now(),
-        },
+        genesisEvent(
+          'CREATED',
+          `Chained trip leg ${i + 1}/${quote.legs.length} — ${load.origin} → ${load.destination}`,
+        ),
       ],
       dealerId: load.dealerId,
       driverId: user.id,

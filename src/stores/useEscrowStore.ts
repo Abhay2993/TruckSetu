@@ -21,7 +21,14 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { isServerMode } from '../config';
 import { SEED_SETTLED_SHIPMENT, SEED_SHIPMENT } from '../data/mock';
 import { api } from '../services/api';
-import type { EscrowShipment, EscrowStage, NotificationKind, ProofOfDelivery } from '../types';
+import { detentionCharge } from '../services/tripRecord';
+import type {
+  DetentionRecord,
+  EscrowShipment,
+  EscrowStage,
+  NotificationKind,
+  ProofOfDelivery,
+} from '../types';
 import { useNotificationsStore } from './useNotificationsStore';
 
 /**
@@ -55,6 +62,13 @@ interface EscrowState {
   generateEwayBill: (shipmentId: string) => Promise<void>;
   /** Aadhaar eSign the digital LR for one party (dev OTP accepted). */
   signContract: (shipmentId: string, as: 'dealer' | 'driver', otp: string) => Promise<void>;
+  /** Record a geofence arrival/departure for detention billing. */
+  stampDetention: (
+    shipmentId: string,
+    stop: 'origin' | 'destination',
+    event: 'arrived' | 'departed',
+    at: number,
+  ) => Promise<void>;
 }
 
 /** Factoring fee: 1.5% of the escrowed balance, minimum ₹49. */
@@ -327,6 +341,51 @@ export const useEscrowStore = create<EscrowState>()(
             shipment.stage,
             fully ? 'Contract fully signed (digital LR)' : `Contract signed by ${as}`,
             { contract: next },
+          ),
+        }));
+      },
+
+      stampDetention: async (shipmentId, stop, event, at) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment) return;
+        const remote = await api.stampDetention(shipmentId, stop, event, at).catch(() => null);
+
+        const base: DetentionRecord = shipment.detention ?? {
+          originArrivedAt: null,
+          originDepartedAt: null,
+          destinationArrivedAt: null,
+          destinationDepartedAt: null,
+          loadingHours: null,
+          unloadingHours: null,
+          chargeInr: 0,
+          settled: false,
+        };
+        // Server mode adopts the authoritative record; demo mode recomputes
+        // the identical arithmetic locally.
+        const next: DetentionRecord =
+          remote ??
+          (() => {
+            const key = `${stop}${event === 'arrived' ? 'ArrivedAt' : 'DepartedAt'}` as
+              | 'originArrivedAt'
+              | 'originDepartedAt'
+              | 'destinationArrivedAt'
+              | 'destinationDepartedAt';
+            const draft: DetentionRecord = { ...base, [key]: at };
+            const hours = (from: number | null, to: number | null): number | null =>
+              from !== null && to !== null && to > from
+                ? Math.round(((to - from) / 3600000) * 10) / 10
+                : null;
+            draft.loadingHours = hours(draft.originArrivedAt, draft.originDepartedAt);
+            draft.unloadingHours = hours(draft.destinationArrivedAt, draft.destinationDepartedAt);
+            draft.chargeInr =
+              (draft.loadingHours !== null ? detentionCharge(draft.loadingHours) : 0) +
+              (draft.unloadingHours !== null ? detentionCharge(draft.unloadingHours) : 0);
+            return draft;
+          })();
+
+        set((s) => ({
+          shipments: s.shipments.map((sh) =>
+            sh.id === shipmentId ? { ...sh, detention: next } : sh,
           ),
         }));
       },

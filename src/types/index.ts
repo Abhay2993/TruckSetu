@@ -106,10 +106,33 @@ export interface ProofOfDelivery {
   verified?: boolean;
 }
 
+/** Geofenced waiting time at each stop, and what it costs. */
+export interface DetentionRecord {
+  originArrivedAt: number | null;
+  originDepartedAt: number | null;
+  destinationArrivedAt: number | null;
+  destinationDepartedAt: number | null;
+  loadingHours: number | null;
+  unloadingHours: number | null;
+  chargeInr: number;
+  settled: boolean;
+}
+
+export interface LedgerVerification {
+  intact: boolean;
+  entryCount: number;
+  brokenAt: number | null;
+  headHash: string | null;
+  detail: string;
+}
+
 export interface EscrowEvent {
   stage: EscrowStage;
   label: string;
   at: number;
+  /** Hash-chain links — absent on records written before chaining. */
+  prevHash?: string;
+  hash?: string;
 }
 
 export interface EscrowShipment {
@@ -144,6 +167,8 @@ export interface EscrowShipment {
   chainId?: string;
   chainLeg?: number;
   chainLegs?: number;
+  /** Geofenced detention/demurrage record. */
+  detention?: DetentionRecord;
 }
 
 export interface ShipmentContract {
@@ -479,6 +504,41 @@ export interface LaneIndex {
   tripCount: number;
   generatedAt: number;
   lanes: LaneIndexRow[];
+}
+
+// ---------------------------------------------------------------------------
+// GST reconciliation (GSTR-2A/2B matching)
+// ---------------------------------------------------------------------------
+
+export type MatchStatus = 'matched' | 'missing_in_portal' | 'missing_in_books' | 'value_mismatch';
+
+export interface ReconRow {
+  invoiceNo: string;
+  shipmentId: string | null;
+  route: string;
+  booksTaxableInr: number | null;
+  booksGstInr: number | null;
+  portalTaxableInr: number | null;
+  portalGstInr: number | null;
+  status: MatchStatus;
+  itcClaimableInr: number;
+  note: string;
+}
+
+export interface Reconciliation {
+  period: string;
+  treatment: 'reverse_charge' | 'forward_charge';
+  rows: ReconRow[];
+  summary: {
+    booksCount: number;
+    portalCount: number;
+    matched: number;
+    missingInPortal: number;
+    missingInBooks: number;
+    valueMismatch: number;
+    itcClaimableInr: number;
+    itcBlockedInr: number;
+  };
 }
 
 /** Everything the driver's marketplace surface renders. */

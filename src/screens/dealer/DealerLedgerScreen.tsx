@@ -14,6 +14,7 @@ import React, { useEffect } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArtTrim } from '../../components/ArtTrim';
+import { GstReconPanel } from '../../components/GstReconPanel';
 import { IndianTruck } from '../../components/IndianTruck';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import {
@@ -42,6 +43,7 @@ function invoiceText(inv: Invoice): string {
     `Route: ${inv.route}`,
     `Driver: ${inv.driverName} (${inv.truckNumber})`,
     `Freight: ${formatINR(inv.baseAmountInr)}`,
+    ...(inv.detentionInr > 0 ? [`Detention: ${formatINR(inv.detentionInr)}`] : []),
     `GST (${GST_RATE * 100}%): ${formatINR(inv.gstInr)}`,
     `Total: ${formatINR(inv.totalInr)}`,
     `Status: ${inv.status}`,
@@ -185,6 +187,9 @@ export function DealerLedgerScreen(): React.JSX.Element {
           <Text style={styles.emptyText}>Lane averages appear after your first booked shipment.</Text>
         )}
 
+        {/* GST reconciliation + ERP export */}
+        <GstReconPanel shipments={shipments} />
+
         {/* Invoices */}
         <Text style={styles.sectionTitle}>Invoices</Text>
         {invoices.map((inv) => {
@@ -207,7 +212,9 @@ export function DealerLedgerScreen(): React.JSX.Element {
               </View>
               <View style={styles.invoiceAmounts}>
                 <Text style={styles.invoiceLine}>
-                  Freight {formatINR(inv.baseAmountInr)} · GST {formatINR(inv.gstInr)} ·{' '}
+                  Freight {formatINR(inv.baseAmountInr)}
+                  {inv.detentionInr > 0 ? ` · Detention ${formatINR(inv.detentionInr)}` : ''} · GST{' '}
+                  {formatINR(inv.gstInr)} ·{' '}
                   <Text style={styles.invoiceTotal}>Total {formatINR(inv.totalInr)}</Text>
                 </Text>
                 {inv.ewayBillNumber ? (

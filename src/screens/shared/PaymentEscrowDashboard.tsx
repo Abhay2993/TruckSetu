@@ -30,6 +30,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Celebration } from '../../components/Celebration';
 import { ChatSheet } from '../../components/ChatSheet';
 import { ContractCard } from '../../components/ContractCard';
+import { DetentionCard } from '../../components/DetentionCard';
 import { IndianTruck } from '../../components/IndianTruck';
 import { TruckProgress } from '../../components/TruckProgress';
 import { DisputePanel } from '../../components/DisputePanel';
@@ -38,6 +39,7 @@ import { RatingStars } from '../../components/RatingStars';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
 import { readConsignmentNo } from '../../services/ocr';
+import { verifyChainLocally } from '../../services/tripRecord';
 import { instantPayoutQuote, splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
@@ -157,6 +159,9 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
 
   const { advanceInr, balanceInr } = splitAmounts(shipment);
   const isProcessing = processingIds.includes(shipment.id);
+  // Recompute the chain on every render — cheap, and it means the badge
+  // reflects the events actually on screen rather than a cached verdict.
+  const ledger = verifyChainLocally(shipment);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -403,12 +408,41 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
             onPress={() => setChatOpen(true)}
           />
           <ContractCard shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
+          <DetentionCard shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
           <DisputePanel shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
         </View>
 
-        {/* Audit timeline */}
+        {/* Audit timeline — hash-chained, so tampering is detectable */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Timeline</Text>
+          <View style={styles.ledgerHead}>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Timeline</Text>
+            <View
+              style={[
+                styles.ledgerChip,
+                { backgroundColor: ledger.intact ? colors.successSoft : colors.dangerSoft },
+              ]}
+            >
+              <Ionicons
+                name={ledger.intact ? 'lock-closed' : 'warning'}
+                size={11}
+                color={ledger.intact ? colors.success : colors.danger}
+              />
+              <Text
+                style={[
+                  styles.ledgerChipText,
+                  { color: ledger.intact ? colors.success : colors.danger },
+                ]}
+              >
+                {ledger.intact ? 'VERIFIED' : 'ALTERED'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.ledgerDetail}>{ledger.detail}</Text>
+          {ledger.headHash && (
+            <Text style={styles.ledgerHash} numberOfLines={1}>
+              head: {ledger.headHash.slice(0, 24)}…
+            </Text>
+          )}
           {[...shipment.events].reverse().map((e, i) => (
             <View key={`${e.at}-${i}`} style={styles.eventRow}>
               <View style={styles.eventDot} />
@@ -666,6 +700,34 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
     fontWeight: '700',
     flex: 1,
+  },
+  ledgerHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ledgerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  ledgerChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  ledgerDetail: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  ledgerHash: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontFamily: 'monospace' as never,
+    marginBottom: spacing.sm,
   },
   eventRow: {
     flexDirection: 'row',

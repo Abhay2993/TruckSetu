@@ -19,6 +19,7 @@ import type {
   AutoRechargeRule,
   ChatMessage,
   CreditFacility,
+  DetentionRecord,
   Dispute,
   DisputeReason,
   DisputeResolution,
@@ -30,9 +31,11 @@ import type {
   InsurancePolicy,
   InvoiceAdvance,
   LaneIndex,
+  LedgerVerification,
   Load,
   MarketSummary,
   MoneySummary,
+  Reconciliation,
   ReturnGuarantee,
   ProofOfDelivery,
   TelemetryPoint,
@@ -568,5 +571,41 @@ export const api = {
   async laneIndex(): Promise<LaneIndex | null> {
     if (!isServerMode) return null;
     return request<LaneIndex>('/v1/index/lanes', { anonymous: true });
+  },
+
+  // -------------------------------------------------------------------------
+  // System of record: detention, tamper-evident ledger, GST reconciliation
+  // -------------------------------------------------------------------------
+
+  async stampDetention(
+    shipmentId: string,
+    stop: 'origin' | 'destination',
+    event: 'arrived' | 'departed',
+    at: number,
+  ): Promise<DetentionRecord | null> {
+    if (!isServerMode) return null;
+    const { detention } = await request<{ detention: DetentionRecord }>(
+      `/v1/shipments/${shipmentId}/detention/stamp`,
+      { method: 'POST', body: { stop, event, at } },
+    );
+    return detention;
+  },
+
+  async verifyLedger(shipmentId: string): Promise<LedgerVerification | null> {
+    if (!isServerMode) return null;
+    const { verification } = await request<{ verification: LedgerVerification }>(
+      `/v1/shipments/${shipmentId}/ledger`,
+    );
+    return verification;
+  },
+
+  async reconcileGst(
+    portalInvoices: { invoiceNo: string; taxableValueInr: number; gstInr: number }[],
+  ): Promise<Reconciliation | null> {
+    if (!isServerMode) return null;
+    return request<Reconciliation>('/v1/gst/reconcile', {
+      method: 'POST',
+      body: { portalInvoices },
+    });
   },
 };

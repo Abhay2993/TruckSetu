@@ -87,6 +87,21 @@ export interface EscrowEvent {
   stage: EscrowStage;
   label: string;
   at: number;
+  /** Hash-chain links — see ledger.ts. Absent on pre-chaining records. */
+  prevHash?: string;
+  hash?: string;
+}
+
+/** Geofenced waiting time at each stop, and what it costs. */
+export interface DetentionRecord {
+  originArrivedAt: number | null;
+  originDepartedAt: number | null;
+  destinationArrivedAt: number | null;
+  destinationDepartedAt: number | null;
+  loadingHours: number | null;
+  unloadingHours: number | null;
+  chargeInr: number;
+  settled: boolean;
 }
 
 export interface EscrowShipment {
@@ -119,6 +134,8 @@ export interface EscrowShipment {
   chainId?: string;
   chainLeg?: number;
   chainLegs?: number;
+  /** Geofenced detention/demurrage record. */
+  detention?: DetentionRecord;
   dealerId?: string;
   driverId?: string;
 }

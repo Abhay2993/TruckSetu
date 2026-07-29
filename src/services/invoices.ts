@@ -25,6 +25,8 @@ export interface Invoice {
   truckNumber: string;
   date: number;
   baseAmountInr: number;
+  /** Detention/demurrage billed on top of the freight. */
+  detentionInr: number;
   gstInr: number;
   totalInr: number;
   /** PAID once the escrow fully settles; else the escrow state. */
@@ -37,7 +39,10 @@ export interface Invoice {
 
 export function buildInvoice(shipment: EscrowShipment): Invoice {
   const { advanceInr, balanceInr } = splitAmounts(shipment);
-  const gstInr = Math.round(shipment.totalAmountInr * GST_RATE);
+  // Detention is freight income and is taxed with the freight.
+  const detentionInr = shipment.detention?.chargeInr ?? 0;
+  const taxableInr = shipment.totalAmountInr + detentionInr;
+  const gstInr = Math.round(taxableInr * GST_RATE);
   const suffix = shipment.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase();
   return {
     number: `TS-INV-${suffix}`,
@@ -47,8 +52,9 @@ export function buildInvoice(shipment: EscrowShipment): Invoice {
     truckNumber: shipment.truckNumber,
     date: shipment.events[0]?.at ?? Date.now(),
     baseAmountInr: shipment.totalAmountInr,
+    detentionInr,
     gstInr,
-    totalInr: shipment.totalAmountInr + gstInr,
+    totalInr: taxableInr + gstInr,
     status:
       shipment.stage === 'BALANCE_RELEASED'
         ? 'PAID'

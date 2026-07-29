@@ -39,17 +39,60 @@ export function generateEwayBill(
   };
 }
 
-/** The digital LR text both parties sign. Deterministic per shipment. */
+/**
+ * The digital LR — issued as the LEGAL ORIGINAL consignment note, not a
+ * summary of a paper one. Deterministic per shipment so the hash is stable.
+ *
+ * A consignment note has to carry specific particulars and the carrier's
+ * liability terms to function as the contract of carriage; those are set
+ * out in full below, including the free-time/detention terms that make
+ * automated demurrage billing enforceable rather than merely calculated.
+ *
+ * Legal footing: eSigned under the IT Act 2000 (s.5 gives electronic
+ * signatures parity, s.4 satisfies "in writing"), with the Carriage by Road
+ * Act 2007 governing the carrier's liability. Have counsel review the
+ * wording and confirm your Carriage by Road registration before issuing
+ * these as originals in production.
+ */
 export function contractText(shipment: EscrowShipment): string {
-  return [
-    'TRUCKSETU DIGITAL LORRY RECEIPT & TRANSPORT CONTRACT',
-    `Shipment: ${shipment.id} · Consignment: ${shipment.consignmentNo ?? '—'}`,
+  const gst = Math.round(shipment.totalAmountInr * 0.05);
+  const lines = [
+    'TRUCKSETU DIGITAL LORRY RECEIPT (CONSIGNMENT NOTE) — LEGAL ORIGINAL',
+    'Issued electronically under the Information Technology Act 2000. This is the',
+    'original consignment note; no paper counterpart is issued.',
+    '',
+    `LR / Consignment No: ${shipment.consignmentNo ?? shipment.id}`,
+    `Shipment: ${shipment.id}`,
     `Route: ${shipment.origin} → ${shipment.destination}`,
-    `Carrier: ${shipment.driverName} (${shipment.truckNumber})`,
-    `Freight: INR ${shipment.totalAmountInr} · Advance ${shipment.advancePercent}% on dispatch · Balance on verified POD via escrow`,
-    'Terms: goods to be delivered in received condition; POD mandatory for balance release;',
-    'disputes freeze escrow until resolved per TruckSetu dispute policy; e-sign under IT Act 2000.',
-  ].join('\n');
+    `Carrier: ${shipment.driverName} · Vehicle ${shipment.truckNumber}`,
+    `Freight: INR ${shipment.totalAmountInr} (GST 5%: INR ${gst})`,
+    `Payment: ${shipment.advancePercent}% advance on dispatch, balance on verified POD, held in TruckSetu escrow`,
+    `Goods-in-transit insurance: ${shipment.insured ? 'YES — cover in force' : 'NOT opted'}`,
+    `e-Way bill: ${shipment.ewayBillNumber ?? 'to be generated before movement'}`,
+    '',
+    'TERMS OF CARRIAGE',
+    '1. The carrier acknowledges receipt of the goods in apparent good order and',
+    '   condition and undertakes to deliver them in the same condition.',
+    '2. Liability of the carrier is governed by the Carriage by Road Act 2007 and',
+    '   the rules made thereunder. Where the consignor has not declared a higher',
+    '   value and paid the corresponding charge, liability is limited as provided',
+    '   by those rules.',
+    '3. Proof of delivery is mandatory. The escrow balance is released only against',
+    '   a POD accepted under the platform verification rules.',
+    '4. FREE TIME AND DETENTION: 6 hours free at loading and 6 hours free at',
+    '   unloading. Beyond free time, detention accrues at INR 250 per hour, capped',
+    '   at INR 6,000 per stop. Waiting time is evidenced by geofenced GPS',
+    '   arrival/departure timestamps recorded by the platform, which both parties',
+    '   accept as the record for this purpose.',
+    '5. A dispute raised under the platform dispute policy freezes the escrow until',
+    '   resolved. Resolution follows that policy and does not waive either party’s',
+    '   statutory rights.',
+    '6. The trip event log for this consignment is hash-chained; its head hash is',
+    '   printed on the delivery record and can be independently verified.',
+    '7. Both parties sign electronically via Aadhaar eSign. Each signature binds the',
+    '   exact text above, identified by its SHA-256 hash.',
+  ];
+  return lines.join('\n');
 }
 
 export function contractHash(shipment: EscrowShipment): string {

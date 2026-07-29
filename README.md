@@ -50,6 +50,10 @@ native dependencies, so it deploys unchanged to Railway / Render / Fly.
 | FASTag | `GET /v1/fastag`, `POST /v1/fastag/topup` |
 | Money | `GET /v1/money/summary`, `…/discount`, `…/credit/draw`, `…/credit/repay`, `…/emi`, `…/fuelcard/swipe`, `…/vehicle-loan/apply`, `…/insurance/renew` |
 | Bureau | `GET /v1/bureau/score` (partner API key + user consent) |
+| Marketplace | `GET /v1/market/summary`, `POST /v1/market/guarantee`, `…/guarantee/:id/claim`, `POST /v1/market/chain` |
+| Index | `GET /v1/index/lanes` (public, no auth) |
+| Trip record | `GET/POST /v1/shipments/:id/detention…`, `GET /v1/shipments/:id/ledger` |
+| Accounting | `POST /v1/gst/reconcile`, `POST /v1/gst/tds`, `GET /v1/accounting/export?format=tally\|zoho\|sap` |
 
 The escrow stage machine is enforced **server-side** (releasing before a POD
 exists returns 409) — the app's local checks are UX, the server is truth.
@@ -89,6 +93,56 @@ fee income) alongside every query.
 > Going live needs an NBFC/lending partner and an RBI co-lending or DLG
 > arrangement. The arithmetic, ledgers and state machines are real; only
 > disbursal/collection swap from simulated to partner rails.
+
+## Network effects (`server/src/marketplace.ts`)
+
+Mechanics that get better as liquidity grows — the screens are copyable,
+the density that makes the numbers work is not.
+
+- **Assured return load** — a guarantee, not a listing: a paying backhaul
+  within 12h of drop or ₹3,500 standby. Offered only where the board has
+  at least 2 open loads out of that city, so depth is the gate.
+- **Lane density + incentives** — trucks inbound to a city (supply) vs open
+  loads leaving it (demand) price a repositioning bonus, capped at ₹4,000
+  and stamped onto the load board itself.
+- **Trip chaining** — a round trip booked as one contract: the shipper pays
+  8% less than three spot bookings while the driver earns 5% more, because
+  no leg runs empty. Each leg is still its own escrow shipment.
+- **Part-load consolidation** — small consignments on one lane pooled into
+  a truckload; every shipper in the pool saves 18%.
+- **Lane rate index** (`GET /v1/index/lanes`, public) — built from agreed
+  shipment prices, not asks, with 7d/30d trend and per-tonne benchmarks.
+
+## System of record
+
+Once disputes, taxes and payments are settled by these records, leaving
+means losing the history.
+
+- **Detention & demurrage** (`detention.ts`) — geofenced GPS arrival and
+  departure timestamps produce billable waiting time: 6h free per stop,
+  then ₹250/hour capped at ₹6,000. The charge flows onto the invoice and
+  into GSTR-1 as taxable freight income, and the free-time terms are on
+  the digital LR both parties eSign — so it is enforceable, not just
+  calculated.
+- **Tamper-evident trip ledger** (`ledger.ts`) — every shipment event is
+  hash-chained (each hash covers the previous one), so editing or removing
+  any event breaks verification from that point on and
+  `GET /v1/shipments/:id/ledger` reports exactly where. This gives
+  tamper-EVIDENCE, not tamper-proofness: the honest upgrade is publishing
+  head hashes to a notary the platform does not control.
+- **GST reconciliation** (`accounting.ts`) — GSTR-2A/2B matching with ITC
+  claimable vs blocked, plus TDS under 194C including the 194C(6)
+  small-fleet exemption that covers most owner-drivers.
+- **ERP connectors** — Tally XML vouchers (importable via Gateway → Import
+  Data), Zoho Books invoice JSON, and an SAP FI posting file.
+- **Digital LR as legal original** — the consignment note carries full
+  particulars and carrier liability terms under the Carriage by Road Act
+  2007, eSigned under the IT Act 2000, with no paper counterpart.
+
+> GST treatment (reverse vs forward charge for GTA), the LR wording and
+> your Carriage by Road registration all need a CA and counsel before you
+> issue these as originals or file anything real. The engines model both
+> treatments and flag which one they applied.
 
 ## Maps
 
