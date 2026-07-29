@@ -54,6 +54,10 @@ native dependencies, so it deploys unchanged to Railway / Render / Fly.
 | Index | `GET /v1/index/lanes` (public, no auth) |
 | Trip record | `GET/POST /v1/shipments/:id/detention…`, `GET /v1/shipments/:id/ledger` |
 | Accounting | `POST /v1/gst/reconcile`, `POST /v1/gst/tds`, `GET /v1/accounting/export?format=tally\|zoho\|sap` |
+| Membership | `GET /v1/membership/summary`, `PUT …/savings/skim`, `POST …/savings/withdraw`, `POST …/rewards/redeem` |
+| Assistance | `GET /v1/assistance/summary`, `POST /v1/assistance/legal`, `POST /v1/assistance/breakdown` |
+| Compliance | `POST /v1/compliance/check`, `GET /v1/compliance/me`, `GET /v1/netc/status` |
+| ONDC | `GET /v1/ondc/status`, `POST /v1/ondc/search\|init\|confirm` (Beckn) |
 
 The escrow stage machine is enforced **server-side** (releasing before a POD
 exists returns 409) — the app's local checks are UX, the server is truth.
@@ -143,6 +147,63 @@ means losing the history.
 > your Carriage by Road registration all need a CA and counsel before you
 > issue these as originals or file anything real. The engines model both
 > treatments and flag which one they applied.
+
+## Suraksha membership (`server/src/membership.ts`, `assistance.ts`)
+
+Every other moat here is software, and software gets copied. A driver whose
+family cover, savings and pension run through TruckSetu does not switch for
+a ₹500 better rate on one trip.
+
+- **Tiers Bronze → Platinum**, earned off the same TruckScore that prices
+  credit — improving the record pays twice. Family health cover to ₹5L,
+  personal accident cover to ₹10L.
+- **Savings + micro-pension** funded by an automatic skim of each settled
+  trip, taken *before* the money reaches the driver — the only mechanism
+  that reliably builds savings on an irregular cash income. Savings
+  withdraw on demand; the pension leg locks to 58 (early exit forfeits the
+  match) and TruckSetu matches up to 6% by tier.
+- **Rewards** — tier-rate cashback on fuel and toll, redeemed straight into
+  the FASTag wallet.
+- **Legal assistance** for challan / RTO / police / accident: opens an
+  advocate-backed case and shows what to do in the next five minutes,
+  because a callback is no use while an officer is at the window.
+- **Breakdown dispatch** — nearest partner garage with an ETA and an SLA
+  clock that is actually judged on arrival, so a late mechanic is recorded
+  as a miss.
+- **Voice-first** (`services/voiceCommands.ts`) — intent matching across
+  Hindi, Punjabi, Telugu, Tamil, Hinglish and English including romanised
+  spellings, with spoken replies carrying live figures. Emergencies match
+  before informational intents. Reachable from every screen via the header
+  mic; every intent is also a large tappable row, so it works today without
+  the speech recogniser (which needs a dev build — see `voice.ts listen`).
+
+> Health/accident cover needs an IRDAI-registered insurer (group policy
+> with TruckSetu as master policyholder); the pension leg needs an NPS/APY
+> intermediary or a partner AMC; legal needs advocates on retainer per
+> state and breakdown needs garage agreements per corridor. The tiering,
+> ledgers, SLA clock and entitlement checks are real.
+
+## Regulatory embedding (`server/src/integrations.ts`)
+
+The moat is the onboarding, not the code: VAHAN/SARATHI needs MoRTH
+approval, NETC needs NPCI membership through an acquirer bank, and ONDC
+needs a signed registry entry. Each takes months a new entrant cannot
+shortcut — so what is built is the exact call shape plus the fallback.
+
+- **Compliance monitor** — registration, fitness, insurance, PUC, permit and
+  licence tracked against the official records, with renewal nudges and a
+  bid gate. Fitness, insurance, PUC and licence lapses **block bidding**;
+  registration and permit only warn, because those are often mid-renewal
+  and stopping a driver's income has to be right. A truck that has never
+  been checked is never punished for the absence of data.
+- **VAHAN / SARATHI / NETC** lookups behind the usual provider slots, with
+  deterministic simulations so the same plate always yields the same record.
+- **ONDC participation** as a BPP on `ONDC:LOG10`: Beckn 1.2.0
+  `search → on_search` publishing the freight catalog (filterable by lane),
+  `init → on_init` quoting with a GST breakup, and `confirm → on_confirm`
+  booking the order into the same escrow + hash-chained ledger path as any
+  other trip. Responses carry the ed25519 `Authorization` header shape;
+  the signing key comes from registry enrolment.
 
 ## Maps
 

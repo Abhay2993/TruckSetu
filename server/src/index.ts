@@ -36,6 +36,18 @@ import {
   resolveBreakdown,
 } from './assistance';
 import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
+import {
+  becknContext,
+  cacheCompliance,
+  cachedCompliance,
+  checkCompliance,
+  integrationModes,
+  netcTagStatus,
+  ondcCatalog,
+  sarathiLookup,
+  signingHeader,
+  vahanLookup,
+} from './integrations';
 import { chainHead, genesisEvent, linkEvent, sealChain, verifyChain } from './ledger';
 import {
   accrueCashback,
@@ -332,6 +344,19 @@ app.post('/v1/loads/:loadId/bids', requireAuth, (req, res) => {
     res.status(409).json({ error: 'Load is no longer open for bidding.' });
     return;
   }
+  // Compliance gate: a truck with lapsed statutory papers cannot bid. This
+  // is what lets the platform promise an enterprise shipper that every
+  // vehicle carrying their freight was road-legal. Only a cached FAILING
+  // check blocks — an unchecked truck is not punished for our not knowing.
+  const compliance = cachedCompliance(user.id);
+  if (compliance && !compliance.canBid) {
+    res.status(409).json({
+      error: `Your truck cannot bid until its papers are renewed: ${compliance.blockingReasons.join('; ')}`,
+      compliance,
+    });
+    return;
+  }
+
   const amount = Number(req.body?.amountInr);
   const truckNumber = typeof req.body?.truckNumber === 'string' ? req.body.truckNumber.trim() : '';
   if (!Number.isFinite(amount) || amount <= 0 || !truckNumber) {
@@ -1335,6 +1360,174 @@ app.post('/v1/payments/webhook', (req, res) => {
 // ---------------------------------------------------------------------------
 // Ops console: HTML desk + summary + action endpoints, guarded by OPS_KEY.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Regulatory embedding: VAHAN/SARATHI/NETC lookups, the compliance monitor
+// that gates bidding, and ONDC network participation. The moat is the
+// onboarding — MoRTH approval, NPCI membership, a signed ONDC registry
+// entry — so what is built here is the exact call shape and the fallback.
+// ---------------------------------------------------------------------------
+
+app.get('/v1/compliance/vehicle/:number', requireAuth, async (req, res) => {
+  try {
+    res.json(await vahanLookup(req.params.number ?? ''));
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'VAHAN lookup failed.' });
+  }
+});
+
+/**
+ * Full compliance check for a truck + driver, cached for a day. This is
+ * what lets TruckSetu tell an enterprise shipper that every vehicle on
+ * their freight was road-legal on the day it moved.
+ */
+app.post('/v1/compliance/check', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const vehicleNumber = typeof req.body?.vehicleNumber === 'string' ? req.body.vehicleNumber : '';
+  const licenceNumber =
+    typeof req.body?.licenceNumber === 'string' && req.body.licenceNumber
+      ? req.body.licenceNumber
+      : null;
+  if (!vehicleNumber.trim()) {
+    res.status(400).json({ error: 'vehicleNumber is required.' });
+    return;
+  }
+  try {
+    const report = await checkCompliance(vehicleNumber, licenceNumber, user.name ?? 'Driver');
+    const cached = cacheCompliance(user.id, report);
+    if (report.expiringCount > 0 || !report.canBid) {
+      // Nudge before the checkpost does.
+      notifyUser({
+        userId: user.id,
+        kind: 'message',
+        title: report.canBid ? 'Papers expiring soon' : 'Truck blocked from bidding',
+        body: report.canBid
+          ? `${report.expiringCount} document(s) expire within 30 days. Renew before your next trip.`
+          : report.blockingReasons.join('; '),
+      });
+    }
+    res.json({ report, cached });
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Compliance check failed.' });
+  }
+});
+
+app.get('/v1/compliance/me', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  res.json({ compliance: cachedCompliance(user.id), modes: integrationModes });
+});
+
+app.get('/v1/compliance/licence/:number', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  try {
+    res.json(await sarathiLookup(req.params.number ?? '', user.name ?? 'Driver'));
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'SARATHI lookup failed.' });
+  }
+});
+
+/** NETC tag status for the driver's FASTag, via the NPCI acquirer. */
+app.get('/v1/netc/status', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const vehicleNumber =
+    typeof req.query.vehicleNumber === 'string' ? req.query.vehicleNumber : 'PB 10 AB 4321';
+  try {
+    res.json(await netcTagStatus(vehicleNumber, wallet(user.id).balanceInr));
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'NETC lookup failed.' });
+  }
+});
+
+// ---- ONDC (Beckn) participation -------------------------------------------
+
+/** Network health/registration view. */
+app.get('/v1/ondc/status', (_req, res) => {
+  res.json({
+    mode: integrationModes.ondc,
+    domain: 'ONDC:LOG10',
+    role: 'BPP',
+    context: becknContext('search'),
+  });
+});
+
+/** Beckn /search → /on_search: publish TruckSetu's freight catalog. */
+app.post('/v1/ondc/search', (req, res) => {
+  const intent = req.body?.message?.intent ?? {};
+  const origin = intent?.fulfillment?.start?.location?.address?.city ?? null;
+  const destination = intent?.fulfillment?.end?.location?.address?.city ?? null;
+  const context = becknContext('on_search', req.body?.context?.transaction_id);
+  const body = { context, message: { catalog: ondcCatalog(origin, destination) } };
+  res.set('Authorization', signingHeader(JSON.stringify(body)));
+  res.json(body);
+});
+
+/** Beckn /init → /on_init: quote a specific item back to the buyer app. */
+app.post('/v1/ondc/init', (req, res) => {
+  const itemId = req.body?.message?.order?.items?.[0]?.id;
+  const load = db.loads.find((l) => l.id === itemId);
+  if (!load) {
+    res.status(404).json({ error: { code: '30004', message: 'Item not found' } });
+    return;
+  }
+  const gst = Math.round(load.priceInr * 0.05);
+  const context = becknContext('on_init', req.body?.context?.transaction_id);
+  res.json({
+    context,
+    message: {
+      order: {
+        provider: { id: process.env.ONDC_SUBSCRIBER_ID ?? 'trucksetu.example.com' },
+        items: [{ id: load.id, fulfillment_id: `ff-${load.id}` }],
+        quote: {
+          price: { currency: 'INR', value: String(load.priceInr + gst) },
+          breakup: [
+            { title: 'Freight', price: { currency: 'INR', value: String(load.priceInr) } },
+            { title: 'GST 5%', price: { currency: 'INR', value: String(gst) } },
+          ],
+        },
+        payment: { type: 'ON-ORDER', collected_by: 'BPP', status: 'NOT-PAID' },
+      },
+    },
+  });
+});
+
+/** Beckn /confirm → /on_confirm: accept the order into the escrow pipeline. */
+app.post('/v1/ondc/confirm', (req, res) => {
+  const itemId = req.body?.message?.order?.items?.[0]?.id;
+  const load = db.loads.find((l) => l.id === itemId);
+  if (!load || load.status !== 'open') {
+    res.status(409).json({ error: { code: '40002', message: 'Item unavailable' } });
+    return;
+  }
+  load.status = 'booked';
+  const shipment: EscrowShipment = {
+    id: newId('shp'),
+    loadId: load.id,
+    origin: load.origin,
+    destination: load.destination,
+    driverName: 'ONDC network order',
+    truckNumber: 'TBD',
+    totalAmountInr: load.priceInr,
+    advancePercent: load.advancePercent,
+    stage: 'CREATED',
+    pod: null,
+    consignmentNo: load.consignmentNo,
+    disputeId: null,
+    events: [genesisEvent('CREATED', `Booked over ONDC (${load.origin} → ${load.destination})`)],
+    dealerId: load.dealerId,
+  };
+  db.shipments.unshift(shipment);
+  persist();
+  res.json({
+    context: becknContext('on_confirm', req.body?.context?.transaction_id),
+    message: {
+      order: {
+        id: shipment.id,
+        state: 'Accepted',
+        items: [{ id: load.id, fulfillment_id: `ff-${load.id}` }],
+      },
+    },
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Suraksha membership + assistance. Software is copyable; a driver whose

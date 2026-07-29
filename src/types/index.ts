@@ -558,6 +558,27 @@ export interface MembershipSummary {
   rewards: RewardsSummary;
 }
 
+// ---------------------------------------------------------------------------
+// Regulatory: VAHAN/SARATHI-backed compliance
+// ---------------------------------------------------------------------------
+
+export interface ComplianceItem {
+  kind: 'registration' | 'fitness' | 'insurance' | 'puc' | 'permit' | 'licence';
+  label: string;
+  validUpto: string;
+  daysLeft: number;
+  status: 'valid' | 'expiring' | 'expired';
+}
+
+export interface VehicleCompliance {
+  vehicleNumber: string;
+  canBid: boolean;
+  blockingReasons: string[];
+  expiringCount: number;
+  items: ComplianceItem[];
+  checkedAt: number;
+}
+
 export type LegalCaseKind =
   | 'challan'
   | 'rto_seizure'

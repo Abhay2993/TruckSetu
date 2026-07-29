@@ -174,6 +174,7 @@ function seed(): DbShape {
     rewards: {},
     legalCases: [],
     breakdowns: [],
+    compliance: {},
   };
 }
 
@@ -201,6 +202,7 @@ function load(): DbShape {
     data.rewards = data.rewards ?? {};
     data.legalCases = data.legalCases ?? [];
     data.breakdowns = data.breakdowns ?? [];
+    data.compliance = data.compliance ?? {};
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not

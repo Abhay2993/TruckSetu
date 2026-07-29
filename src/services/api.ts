@@ -44,6 +44,7 @@ import type {
   ReturnGuarantee,
   RewardsSummary,
   SavingsAccount,
+  VehicleCompliance,
   ProofOfDelivery,
   TelemetryPoint,
   AuthUser,
@@ -681,5 +682,29 @@ export const api = {
       '/v1/assistance/breakdown',
       { method: 'POST', body: { latitude, longitude, problem } },
     );
+  },
+
+  // -------------------------------------------------------------------------
+  // Regulatory: VAHAN/SARATHI compliance
+  // -------------------------------------------------------------------------
+
+  async checkCompliance(
+    vehicleNumber: string,
+    licenceNumber: string | null,
+  ): Promise<VehicleCompliance | null> {
+    if (!isServerMode) return null;
+    const { cached } = await request<{ cached: VehicleCompliance }>('/v1/compliance/check', {
+      method: 'POST',
+      body: { vehicleNumber, licenceNumber },
+    });
+    return cached;
+  },
+
+  async myCompliance(): Promise<VehicleCompliance | null> {
+    if (!isServerMode) return null;
+    const { compliance } = await request<{ compliance: VehicleCompliance | null }>(
+      '/v1/compliance/me',
+    );
+    return compliance;
   },
 };

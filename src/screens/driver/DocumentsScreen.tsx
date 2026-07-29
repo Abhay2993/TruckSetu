@@ -13,6 +13,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ComplianceMonitor } from '../../components/ComplianceMonitor';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
 import { expiryStatus, useDocumentsStore } from '../../stores/useDocumentsStore';
@@ -78,6 +79,9 @@ export function DocumentsScreen(): React.JSX.Element {
       <ScreenHeader />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>{t('documentsTitle')}</Text>
+
+        {/* Official-record check — this one can block bidding */}
+        <ComplianceMonitor />
 
         {alerts.length > 0 && (
           <View style={styles.alertBanner}>

@@ -484,6 +484,29 @@ export interface BreakdownCase {
   slaMet: boolean | null;
 }
 
+// ---------------------------------------------------------------------------
+// Regulatory: VAHAN/SARATHI-backed compliance
+// ---------------------------------------------------------------------------
+
+export interface ComplianceItem {
+  kind: 'registration' | 'fitness' | 'insurance' | 'puc' | 'permit' | 'licence';
+  label: string;
+  validUpto: string;
+  daysLeft: number;
+  status: 'valid' | 'expiring' | 'expired';
+}
+
+export interface VehicleCompliance {
+  userId: string;
+  vehicleNumber: string;
+  /** False when a statutory document has lapsed — blocks bidding. */
+  canBid: boolean;
+  blockingReasons: string[];
+  expiringCount: number;
+  items: ComplianceItem[];
+  checkedAt: number;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -513,4 +536,6 @@ export interface DbShape {
   rewards: Record<string, RewardsLedger>;
   legalCases: AssistanceCase[];
   breakdowns: BreakdownCase[];
+  /** Regulatory: cached VAHAN/SARATHI compliance, keyed by user id. */
+  compliance: Record<string, VehicleCompliance>;
 }
