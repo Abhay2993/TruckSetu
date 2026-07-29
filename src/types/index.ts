@@ -507,6 +507,112 @@ export interface LaneIndex {
 }
 
 // ---------------------------------------------------------------------------
+// Suraksha membership: tiers, savings/pension, rewards, assistance
+// ---------------------------------------------------------------------------
+
+export type Tier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+
+export interface TierBenefits {
+  tier: Tier;
+  healthCoverInr: number;
+  accidentCoverInr: number;
+  cashbackPercent: number;
+  savingsMatchPercent: number;
+  legalCasesPerYear: number;
+  breakdownCalloutsPerYear: number;
+  breakdownSlaMinutes: number;
+}
+
+export interface SavingsTxn {
+  id: string;
+  kind: 'skim' | 'match' | 'interest' | 'withdrawal';
+  amountInr: number;
+  note: string;
+  at: number;
+}
+
+export interface SavingsAccount {
+  skimPercent: number;
+  savingsInr: number;
+  pensionInr: number;
+  matchedInr: number;
+  interestInr: number;
+  transactions: SavingsTxn[];
+  openedAt: number;
+}
+
+export interface RewardsSummary {
+  tier: Tier;
+  cashbackPercent: number;
+  earnedInr: number;
+  redeemedInr: number;
+  availableInr: number;
+  nextTierWouldHavePaidInr: number | null;
+}
+
+export interface MembershipSummary {
+  benefits: TierBenefits;
+  progress: { settledTrips: number; score: number; needTrips: number; needScore: number };
+  next: TierBenefits | null;
+  savings: SavingsAccount;
+  rewards: RewardsSummary;
+}
+
+export type LegalCaseKind =
+  | 'challan'
+  | 'rto_seizure'
+  | 'police_stop'
+  | 'accident_claim'
+  | 'overloading_notice'
+  | 'other';
+
+export interface AssistanceCase {
+  id: string;
+  kind: LegalCaseKind;
+  detail: string;
+  latitude: number | null;
+  longitude: number | null;
+  status: 'open' | 'assigned' | 'resolved';
+  covered: boolean;
+  advocateName: string | null;
+  outcome?: string;
+  at: number;
+  resolvedAt: number | null;
+}
+
+export interface BreakdownCase {
+  id: string;
+  latitude: number;
+  longitude: number;
+  problem: string;
+  status: 'dispatched' | 'on_site' | 'resolved';
+  covered: boolean;
+  garageName: string | null;
+  garagePhone: string | null;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+  slaMinutes: number;
+  slaDeadlineAt: number;
+  note?: string;
+  at: number;
+  arrivedAt: number | null;
+  resolvedAt: number | null;
+  slaMet: boolean | null;
+}
+
+export interface AssistanceSummary {
+  helpline: string;
+  legal: { used: number; allowed: number; cases: AssistanceCase[] };
+  breakdown: {
+    used: number;
+    allowed: number;
+    slaMinutes: number;
+    cases: BreakdownCase[];
+  };
+  garages: { name: string; city: string; latitude: number; longitude: number; phone: string }[];
+}
+
+// ---------------------------------------------------------------------------
 // GST reconciliation (GSTR-2A/2B matching)
 // ---------------------------------------------------------------------------
 

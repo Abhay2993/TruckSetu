@@ -46,6 +46,7 @@ export interface TranslationKeys {
   fuelPricesTitle: string;
   placeBid: string;
   voiceAmenitySummary: string;
+  voiceAssistant: string;
 }
 
 export const SUPPORTED_LOCALES: { code: Locale; label: string }[] = [
@@ -84,6 +85,7 @@ const translations: Record<Locale, TranslationKeys> = {
     fuelPricesTitle: 'Diesel Prices',
     placeBid: 'Place Bid',
     voiceAmenitySummary: '{count} stops ahead on your route. Nearest is {name}, {km} kilometres away.',
+    voiceAssistant: 'Ask Setu',
   },
   hi: {
     appTagline: 'लोड और ट्रक के बीच भरोसे का सेतु',
@@ -112,6 +114,7 @@ const translations: Record<Locale, TranslationKeys> = {
     fuelPricesTitle: 'डीज़ल के दाम',
     placeBid: 'बोली लगाएं',
     voiceAmenitySummary: 'आपके रास्ते में {count} ठिकाने हैं। सबसे नज़दीक {name}, {km} किलोमीटर दूर।',
+    voiceAssistant: 'सेतु से पूछो',
   },
   pa: {
     appTagline: 'ਲੋਡ ਅਤੇ ਟਰੱਕ ਵਿਚਕਾਰ ਭਰੋਸੇ ਦਾ ਪੁਲ',
@@ -140,6 +143,7 @@ const translations: Record<Locale, TranslationKeys> = {
     fuelPricesTitle: 'ਡੀਜ਼ਲ ਦੇ ਭਾਅ',
     placeBid: 'ਬੋਲੀ ਲਗਾਓ',
     voiceAmenitySummary: 'ਤੁਹਾਡੇ ਰਾਹ ਵਿੱਚ {count} ਟਿਕਾਣੇ ਹਨ। ਸਭ ਤੋਂ ਨੇੜੇ {name}, {km} ਕਿਲੋਮੀਟਰ ਦੂਰ।',
+    voiceAssistant: 'ਸੇਤੂ ਤੋਂ ਪੁੱਛੋ',
   },
   te: {
     appTagline: 'లోడ్లు మరియు ట్రక్కుల మధ్య నమ్మకమైన వంతెన',
@@ -168,6 +172,7 @@ const translations: Record<Locale, TranslationKeys> = {
     fuelPricesTitle: 'డీజిల్ ధరలు',
     placeBid: 'బిడ్ వేయండి',
     voiceAmenitySummary: 'మీ దారిలో {count} స్థలాలు ఉన్నాయి. అతి దగ్గరగా {name}, {km} కిలోమీటర్ల దూరంలో.',
+    voiceAssistant: 'సేతును అడగండి',
   },
   ta: {
     appTagline: 'லோடுகளுக்கும் லாரிகளுக்கும் இடையிலான நம்பிக்கை பாலம்',
@@ -196,6 +201,7 @@ const translations: Record<Locale, TranslationKeys> = {
     fuelPricesTitle: 'டீசல் விலைகள்',
     placeBid: 'ஏலம் விடவும்',
     voiceAmenitySummary: 'உங்கள் வழியில் {count} இடங்கள் உள்ளன. அருகில் {name}, {km} கிலோமீட்டர் தொலைவில்.',
+    voiceAssistant: 'சேதுவிடம் கேளுங்கள்',
   },
 };
 

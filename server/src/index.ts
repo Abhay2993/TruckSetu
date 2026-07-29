@@ -27,8 +27,26 @@ import {
   recordGeofenceEvents,
   stampDetention,
 } from './detention';
+import {
+  assistanceSummary,
+  LEGAL_KINDS,
+  markMechanicArrived,
+  openLegalCase,
+  requestBreakdown,
+  resolveBreakdown,
+} from './assistance';
 import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
 import { chainHead, genesisEvent, linkEvent, sealChain, verifyChain } from './ledger';
+import {
+  accrueCashback,
+  ensureSavings,
+  membershipSummary,
+  redeemCashback,
+  rewardsSummary,
+  SAVINGS,
+  skimToSavings,
+  withdrawSavings,
+} from './membership';
 import {
   activeGuaranteeFor,
   buildChain,
@@ -78,6 +96,7 @@ import {
   FastagWallet,
   FuelPrice,
   InvoiceAdvance,
+  LegalCaseKind,
   Load,
   TelemetryPoint,
   VehicleLoanApplication,
@@ -530,11 +549,22 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
     return;
   }
   if (shipment.driverId) commitEscrowDeductions(shipment.driverId, plan);
-  const netInr = plan.netInr;
+  // Savings before spending: a share of the settled trip is swept into the
+  // driver's savings/pension while the money is still on the platform.
+  const skim = shipment.driverId
+    ? skimToSavings(shipment.driverId, plan.netInr)
+    : { skimmedInr: 0, toSavingsInr: 0, toPensionInr: 0, matchInr: 0 };
+  const netInr = plan.netInr - skim.skimmedInr;
   shipment.stage = 'BALANCE_RELEASED';
   pushEvent(shipment, `Balance released from escrow (ref ${referenceId})`);
   for (const d of plan.deductions) {
     pushEvent(shipment, `Auto-deducted ₹${d.amountInr} — ${d.label}`);
+  }
+  if (skim.skimmedInr > 0) {
+    pushEvent(
+      shipment,
+      `Saved ₹${skim.skimmedInr} (₹${skim.toPensionInr} to pension${skim.matchInr > 0 ? `, +₹${skim.matchInr} tier match` : ''})`,
+    );
   }
   persist();
   if (shipment.driverId) {
@@ -546,7 +576,7 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
       shipmentId: shipment.id,
     });
   }
-  res.json({ shipment, netInr, deductions: plan.deductions });
+  res.json({ shipment, netInr, deductions: plan.deductions, savings: skim });
 });
 
 /**
@@ -889,11 +919,14 @@ app.post('/v1/fastag/toll', requireAuth, (req, res) => {
   });
   const before = w.balanceInr;
   applyAutoRecharge(w);
+  // Membership cashback on toll spend, at the driver's tier rate.
+  const tierCashbackInr = accrueCashback(user.id, Math.round(amount), 'toll');
   persist();
   res.json({
     balanceInr: w.balanceInr,
     transactions: w.transactions,
     autoRecharged: w.balanceInr !== before,
+    tierCashbackInr,
   });
 });
 
@@ -1302,6 +1335,164 @@ app.post('/v1/payments/webhook', (req, res) => {
 // ---------------------------------------------------------------------------
 // Ops console: HTML desk + summary + action endpoints, guarded by OPS_KEY.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Suraksha membership + assistance. Software is copyable; a driver whose
+// family cover, savings and pension run through TruckSetu is not.
+// ---------------------------------------------------------------------------
+
+app.get('/v1/membership/summary', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  res.json(membershipSummary(user.id));
+});
+
+/** Set the share of each settled trip swept into savings. */
+app.put('/v1/membership/savings/skim', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const percent = Number(req.body?.percent);
+  if (!Number.isFinite(percent) || percent < 0 || percent > SAVINGS.MAX_SKIM_PERCENT) {
+    res.status(400).json({ error: `percent must be between 0 and ${SAVINGS.MAX_SKIM_PERCENT}.` });
+    return;
+  }
+  const account = ensureSavings(user.id);
+  account.skimPercent = Math.round(percent);
+  persist();
+  res.json({ savings: account });
+});
+
+app.post('/v1/membership/savings/withdraw', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.body?.amountInr));
+  const leg = req.body?.leg === 'pension' ? 'pension' : 'savings';
+  const age = Number.isFinite(Number(req.body?.age)) ? Number(req.body.age) : null;
+  if (!Number.isFinite(amountInr)) {
+    res.status(400).json({ error: 'amountInr must be a number.' });
+    return;
+  }
+  const result = withdrawSavings(user.id, amountInr, leg, age);
+  if (!result.ok) {
+    res.status(409).json({ error: result.reason });
+    return;
+  }
+  try {
+    await executePayout('balance', `savings-${user.id}`, result.paidInr);
+  } catch (error) {
+    console.error('[membership] savings withdrawal payout failed', error);
+    res.status(502).json({ error: 'Payout failed — try again.' });
+    return;
+  }
+  res.json({ ...result, savings: db.savings[user.id] });
+});
+
+app.post('/v1/membership/rewards/redeem', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.body?.amountInr));
+  if (!Number.isFinite(amountInr)) {
+    res.status(400).json({ error: 'amountInr must be a number.' });
+    return;
+  }
+  const result = redeemCashback(user.id, amountInr);
+  if (!result.ok) {
+    res.status(409).json({ error: result.reason });
+    return;
+  }
+  // Cashback lands where a driver can spend it immediately: the toll wallet.
+  const w = wallet(user.id);
+  w.balanceInr += amountInr;
+  w.transactions.unshift({
+    id: newId('ft'),
+    label: 'TruckSetu rewards cashback',
+    amountInr,
+    at: Date.now(),
+  });
+  persist();
+  res.json({ rewards: rewardsSummary(user.id), fastagBalanceInr: w.balanceInr });
+});
+
+// ---- Assistance: legal + breakdown ----------------------------------------
+
+app.get('/v1/assistance/summary', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  res.json(assistanceSummary(user.id));
+});
+
+app.post('/v1/assistance/legal', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const kind = req.body?.kind as LegalCaseKind;
+  if (!LEGAL_KINDS.includes(kind)) {
+    res.status(400).json({ error: `kind must be one of ${LEGAL_KINDS.join(', ')}.` });
+    return;
+  }
+  const lat = Number(req.body?.latitude);
+  const lng = Number(req.body?.longitude);
+  const location =
+    Number.isFinite(lat) && Number.isFinite(lng) ? { latitude: lat, longitude: lng } : null;
+  const result = openLegalCase(
+    user.id,
+    kind,
+    typeof req.body?.detail === 'string' ? req.body.detail : '',
+    location,
+  );
+  notifyUser({
+    userId: user.id,
+    kind: 'message',
+    title: result.covered ? 'Legal help on the way' : 'Legal case logged',
+    body: result.covered
+      ? 'An advocate from our panel will call you shortly. Read the first-aid steps in the app now.'
+      : 'You have used your covered cases this year — this one is chargeable. An advocate will still call.',
+  });
+  res.status(201).json(result);
+});
+
+app.post('/v1/assistance/breakdown', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const lat = Number(req.body?.latitude);
+  const lng = Number(req.body?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    res.status(400).json({ error: 'latitude and longitude are required.' });
+    return;
+  }
+  const result = requestBreakdown(
+    user.id,
+    lat,
+    lng,
+    typeof req.body?.problem === 'string' ? req.body.problem : 'Breakdown',
+  );
+  console.warn(
+    `[breakdown] ${user.phone} at ${lat},${lng} -> ${result.case.garageName ?? 'no garage'} (SLA ${result.slaMinutes}m)`,
+  );
+  notifyUser({
+    userId: user.id,
+    kind: 'message',
+    title: 'Mechanic dispatched',
+    body: result.case.garageName
+      ? `${result.case.garageName} is ${result.case.distanceKm} km away, ETA ${result.case.etaMinutes} min. We aim to reach you within ${result.slaMinutes} min.`
+      : 'No partner garage on this stretch — our desk is calling around now.',
+  });
+  res.status(201).json(result);
+});
+
+/** Ops/garage marks arrival — this is when the SLA is judged. */
+app.post('/v1/assistance/breakdown/:id/arrived', requireAuth, (req, res) => {
+  const record = markMechanicArrived(req.params.id ?? '');
+  if (!record) {
+    res.status(404).json({ error: 'Breakdown case not found.' });
+    return;
+  }
+  res.json({ case: record, slaMet: record.slaMet });
+});
+
+app.post('/v1/assistance/breakdown/:id/resolve', requireAuth, (req, res) => {
+  const record = resolveBreakdown(
+    req.params.id ?? '',
+    typeof req.body?.note === 'string' ? req.body.note : 'Fixed on site',
+  );
+  if (!record) {
+    res.status(404).json({ error: 'Breakdown case not found.' });
+    return;
+  }
+  res.json({ case: record });
+});
 
 // ---------------------------------------------------------------------------
 // System of record: detention billing, the tamper-evident ledger, GST
@@ -1818,7 +2009,10 @@ app.post('/v1/money/fuelcard/swipe', requireAuth, (req, res) => {
     return;
   }
   const result = swipeFuelCard(user.id, pump, litres);
-  res.status(201).json({ ...result, card: db.fuelCards[user.id] });
+  // Membership cashback on top of the card's own rebate — the tier pays out
+  // on every fill, so a better TruckScore is felt immediately.
+  const tierCashbackInr = accrueCashback(user.id, result.netInr, 'fuel');
+  res.status(201).json({ ...result, tierCashbackInr, card: db.fuelCards[user.id] });
 });
 
 /** Truck purchase / refinance — score-priced APR. */

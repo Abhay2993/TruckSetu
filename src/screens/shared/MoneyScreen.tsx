@@ -26,6 +26,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArtTrim } from '../../components/ArtTrim';
 import { IndianTruck } from '../../components/IndianTruck';
+import { MembershipCard } from '../../components/MembershipCard';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import {
   EMI_CATALOGUE,
@@ -34,6 +35,7 @@ import {
   vehicleLoanQuote,
 } from '../../services/money';
 import { useAppStore } from '../../stores/useAppStore';
+import { useMembershipStore } from '../../stores/useMembershipStore';
 import { useMoneyStore } from '../../stores/useMoneyStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import { notify } from '../../utils/dialog';
@@ -58,12 +60,16 @@ export function MoneyScreen(): React.JSX.Element {
   const applyVehicleLoan = useMoneyStore((s) => s.applyVehicleLoan);
   const setBureauConsent = useMoneyStore((s) => s.setBureauConsent);
 
+  const membership = useMembershipStore((s) => s.summary);
+  const refreshMembership = useMembershipStore((s) => s.refresh);
+
   const [drawAmount, setDrawAmount] = useState<number>(10000);
   const [loanAmount, setLoanAmount] = useState<number>(1200000);
 
   useEffect(() => {
     void refresh();
-  }, [refresh]);
+    void refreshMembership();
+  }, [refresh, refreshMembership]);
 
   if (!summary) {
     return (
@@ -129,6 +135,9 @@ export function MoneyScreen(): React.JSX.Element {
             ))}
           </View>
         </LinearGradient>
+
+        {/* Suraksha membership — cover, savings, rewards (drivers only) */}
+        {!isDealer && membership && <MembershipCard summary={membership} />}
 
         {/* Revolving working-capital line */}
         <Section

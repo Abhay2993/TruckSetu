@@ -4,8 +4,8 @@
  * default header so the "Setu" rotator (Feature A) is visible everywhere.
  */
 
-import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from '../i18n/i18n';
 import { useAppStore } from '../stores/useAppStore';
@@ -15,6 +15,7 @@ import { confirmAction } from '../utils/dialog';
 import { ArtTrim } from './ArtTrim';
 import { DynamicHeader } from './DynamicHeader';
 import { NotificationBell } from './NotificationBell';
+import { VoiceAssistant } from './VoiceAssistant';
 
 interface ScreenHeaderProps {
   /** When provided, renders the green/red online pill. */
@@ -26,6 +27,7 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
   const t = useTranslation();
   const setRole = useAppStore((s) => s.setRole);
   const signOut = useAuthStore((s) => s.signOut);
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   const handleSignOut = async () => {
     const ok = await confirmAction(
@@ -58,6 +60,16 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
             </Text>
           </View>
         )}
+        {/* Voice-first: reachable from every screen, not buried in a menu */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('voiceAssistant')}
+          onPress={() => setVoiceOpen(true)}
+          hitSlop={8}
+          style={[styles.switchBtn, styles.micBtn]}
+        >
+          <MaterialCommunityIcons name="microphone" size={18} color={colors.accent} />
+        </Pressable>
         <NotificationBell />
         <Pressable
           accessibilityRole="button"
@@ -81,6 +93,7 @@ export function ScreenHeader({ isOnline, queuedCount = 0 }: ScreenHeaderProps): 
       </View>
       {/* Signature lorry-art bunting under every header */}
       <ArtTrim height={7} />
+      <VoiceAssistant visible={voiceOpen} onClose={() => setVoiceOpen(false)} />
     </View>
   );
 }
@@ -129,5 +142,8 @@ const styles = StyleSheet.create({
     padding: spacing.xs,
     borderRadius: radii.sm,
     backgroundColor: colors.background,
+  },
+  micBtn: {
+    backgroundColor: colors.accentSoft,
   },
 });

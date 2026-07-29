@@ -21,6 +21,7 @@ import { FastagCard } from '../../components/FastagCard';
 import { FuelPriceCard } from '../../components/FuelPriceCard';
 import { RouteMap } from '../../components/RouteMap';
 import { ScreenHeader } from '../../components/ScreenHeader';
+import { AssistancePanel } from '../../components/AssistancePanel';
 import { SosButton } from '../../components/SosButton';
 import { AMENITIES } from '../../data/mock';
 import { useOfflineTelemetry } from '../../hooks/OfflineTelemetryHook';
@@ -113,6 +114,9 @@ export function DriverRouteScreen(): React.JSX.Element {
 
         {/* SOS: button when idle, red status banner while an alert is live */}
         <SosButton lastPoint={lastPoint} />
+
+        {/* Breakdown + legal help — the two calls a driver actually makes */}
+        <AssistancePanel lastPoint={lastPoint} />
 
         {/* Offline banner — visible reassurance that fixes aren't being lost */}
         {!telemetry.isOnline && (

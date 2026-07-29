@@ -170,6 +170,10 @@ function seed(): DbShape {
     policies: [],
     bureauQueries: [],
     returnGuarantees: [],
+    savings: {},
+    rewards: {},
+    legalCases: [],
+    breakdowns: [],
   };
 }
 
@@ -193,6 +197,10 @@ function load(): DbShape {
     data.policies = data.policies ?? [];
     data.bureauQueries = data.bureauQueries ?? [];
     data.returnGuarantees = data.returnGuarantees ?? [];
+    data.savings = data.savings ?? {};
+    data.rewards = data.rewards ?? {};
+    data.legalCases = data.legalCases ?? [];
+    data.breakdowns = data.breakdowns ?? [];
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not

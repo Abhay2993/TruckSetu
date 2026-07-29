@@ -408,6 +408,82 @@ export interface ReturnGuarantee {
   paidAt: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Membership (Suraksha): savings, pension, rewards, assistance
+// ---------------------------------------------------------------------------
+
+export interface SavingsTxn {
+  id: string;
+  kind: 'skim' | 'match' | 'interest' | 'withdrawal';
+  amountInr: number;
+  note: string;
+  at: number;
+}
+
+export interface SavingsAccount {
+  userId: string;
+  /** Share of each settled trip swept into savings (0 disables). */
+  skimPercent: number;
+  savingsInr: number;
+  /** Locked leg — the micro-pension. */
+  pensionInr: number;
+  matchedInr: number;
+  interestInr: number;
+  transactions: SavingsTxn[];
+  openedAt: number;
+}
+
+export interface RewardsLedger {
+  earnedInr: number;
+  redeemedInr: number;
+}
+
+export type LegalCaseKind =
+  | 'challan'
+  | 'rto_seizure'
+  | 'police_stop'
+  | 'accident_claim'
+  | 'overloading_notice'
+  | 'other';
+
+export interface AssistanceCase {
+  id: string;
+  userId: string;
+  kind: LegalCaseKind;
+  detail: string;
+  latitude: number | null;
+  longitude: number | null;
+  status: 'open' | 'assigned' | 'resolved';
+  /** Whether the membership tier covers this one. */
+  covered: boolean;
+  advocateName: string | null;
+  outcome?: string;
+  at: number;
+  resolvedAt: number | null;
+}
+
+export interface BreakdownCase {
+  id: string;
+  userId: string;
+  latitude: number;
+  longitude: number;
+  problem: string;
+  status: 'dispatched' | 'on_site' | 'resolved';
+  covered: boolean;
+  garageName: string | null;
+  garagePhone: string | null;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+  slaMinutes: number;
+  slaDeadlineAt: number;
+  note?: string;
+  at: number;
+  arrivedAt: number | null;
+  resolvedAt: number | null;
+  /** Set when the mechanic arrives: did we hit the promised SLA? */
+  slaMet: boolean | null;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -432,4 +508,9 @@ export interface DbShape {
   bureauQueries: BureauQuery[];
   /** Marketplace. */
   returnGuarantees: ReturnGuarantee[];
+  /** Membership: keyed by user id where noted. */
+  savings: Record<string, SavingsAccount>;
+  rewards: Record<string, RewardsLedger>;
+  legalCases: AssistanceCase[];
+  breakdowns: BreakdownCase[];
 }

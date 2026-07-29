@@ -16,7 +16,10 @@
 import { DEMO_OTP, isServerMode } from '../config';
 import type {
   AppNotification,
+  AssistanceCase,
+  AssistanceSummary,
   AutoRechargeRule,
+  BreakdownCase,
   ChatMessage,
   CreditFacility,
   DetentionRecord,
@@ -32,11 +35,15 @@ import type {
   InvoiceAdvance,
   LaneIndex,
   LedgerVerification,
+  LegalCaseKind,
   Load,
   MarketSummary,
+  MembershipSummary,
   MoneySummary,
   Reconciliation,
   ReturnGuarantee,
+  RewardsSummary,
+  SavingsAccount,
   ProofOfDelivery,
   TelemetryPoint,
   AuthUser,
@@ -607,5 +614,72 @@ export const api = {
       method: 'POST',
       body: { portalInvoices },
     });
+  },
+
+  // -------------------------------------------------------------------------
+  // Suraksha membership + assistance
+  // -------------------------------------------------------------------------
+
+  async membershipSummary(): Promise<MembershipSummary | null> {
+    if (!isServerMode) return null;
+    return request<MembershipSummary>('/v1/membership/summary');
+  },
+
+  async setSavingsSkim(percent: number): Promise<SavingsAccount | null> {
+    if (!isServerMode) return null;
+    const { savings } = await request<{ savings: SavingsAccount }>('/v1/membership/savings/skim', {
+      method: 'PUT',
+      body: { percent },
+    });
+    return savings;
+  },
+
+  async withdrawSavings(
+    amountInr: number,
+    leg: 'savings' | 'pension',
+    age?: number,
+  ): Promise<{ paidInr: number; reason: string } | null> {
+    if (!isServerMode) return null;
+    return request<{ paidInr: number; reason: string }>('/v1/membership/savings/withdraw', {
+      method: 'POST',
+      body: { amountInr, leg, age },
+    });
+  },
+
+  async redeemCashback(amountInr: number): Promise<{ rewards: RewardsSummary } | null> {
+    if (!isServerMode) return null;
+    return request<{ rewards: RewardsSummary }>('/v1/membership/rewards/redeem', {
+      method: 'POST',
+      body: { amountInr },
+    });
+  },
+
+  async assistanceSummary(): Promise<AssistanceSummary | null> {
+    if (!isServerMode) return null;
+    return request<AssistanceSummary>('/v1/assistance/summary');
+  },
+
+  async openLegalCase(
+    kind: LegalCaseKind,
+    detail: string,
+    location: { latitude: number; longitude: number } | null,
+  ): Promise<{ case: AssistanceCase; covered: boolean; firstAid: string; helpline: string } | null> {
+    if (!isServerMode) return null;
+    return request<{ case: AssistanceCase; covered: boolean; firstAid: string; helpline: string }>(
+      '/v1/assistance/legal',
+      { method: 'POST', body: { kind, detail, ...location } },
+    );
+  },
+
+  async requestBreakdown(
+    latitude: number,
+    longitude: number,
+    problem: string,
+  ): Promise<{ case: BreakdownCase; covered: boolean; slaMinutes: number } | null> {
+    if (!isServerMode) return null;
+    return request<{ case: BreakdownCase; covered: boolean; slaMinutes: number }>(
+      '/v1/assistance/breakdown',
+      { method: 'POST', body: { latitude, longitude, problem } },
+    );
   },
 };
