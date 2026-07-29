@@ -9,7 +9,7 @@
  */
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -22,12 +22,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ReturnGuaranteeCard } from '../../components/ReturnGuaranteeCard';
 import { ScreenHeader } from '../../components/ScreenHeader';
+import { TripChainCard } from '../../components/TripChainCard';
 import { useTranslation } from '../../i18n/i18n';
 import { estimateTripPnl } from '../../services/tripPnl';
 import { useDriverStore } from '../../stores/useDriverStore';
 import { useEscrowStore } from '../../stores/useEscrowStore';
 import { useLoadsStore } from '../../stores/useLoadsStore';
+import { useMarketStore } from '../../stores/useMarketStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Load } from '../../types';
 import { notify } from '../../utils/dialog';
@@ -42,6 +45,21 @@ export function DriverLoadsScreen(): React.JSX.Element {
   // The driver's active trip decides what counts as a "return" load.
   const activeTrip = shipments.find((s) => s.stage !== 'BALANCE_RELEASED');
   const tripDestination = activeTrip?.destination ?? 'Jaipur';
+
+  // Marketplace layer: the guarantee, lane incentives and trip chaining all
+  // key off the city this driver is heading into.
+  const market = useMarketStore((s) => s.summary);
+  const refreshMarket = useMarketStore((s) => s.refresh);
+  useEffect(() => {
+    void refreshMarket(tripDestination);
+  }, [refreshMarket, tripDestination]);
+
+  // Server mode stamps the bonus onto each load; demo mode reads it off the
+  // locally computed lane densities. Same number either way.
+  const incentiveFor = (load: Load): number =>
+    load.incentiveInr ??
+    market?.lanes.find((l) => l.lane === `${load.origin} → ${load.destination}`)?.incentiveInr ??
+    0;
 
   const { returnLoads, otherLoads } = useMemo(() => {
     const open = loads.filter((l) => l.status === 'open');
@@ -63,11 +81,33 @@ export function DriverLoadsScreen(): React.JSX.Element {
           </Text>
         </View>
 
+        {market && (
+          <ReturnGuaranteeCard
+            offer={market.guarantee}
+            active={market.activeGuarantee}
+            shipmentId={activeTrip?.id ?? null}
+          />
+        )}
+
+        {market?.chain && (
+          <TripChainCard
+            quote={market.chain}
+            startCity={tripDestination}
+            truckNumber={activeTrip?.truckNumber ?? 'PB 10 AB 4321'}
+          />
+        )}
+
         <Text style={styles.sectionTitle}>
           {t('returnLoads')} · {tripDestination}
         </Text>
         {returnLoads.map((load) => (
-          <LoadRow key={load.id} load={load} highlight onBid={() => setBiddingOn(load)} />
+          <LoadRow
+            key={load.id}
+            load={load}
+            highlight
+            incentiveInr={incentiveFor(load)}
+            onBid={() => setBiddingOn(load)}
+          />
         ))}
         {returnLoads.length === 0 && (
           <Text style={styles.emptyText}>No loads out of {tripDestination} right now — check back soon.</Text>
@@ -77,7 +117,12 @@ export function DriverLoadsScreen(): React.JSX.Element {
           <>
             <Text style={styles.sectionTitle}>More open loads</Text>
             {otherLoads.map((load) => (
-              <LoadRow key={load.id} load={load} onBid={() => setBiddingOn(load)} />
+              <LoadRow
+                key={load.id}
+                load={load}
+                incentiveInr={incentiveFor(load)}
+                onBid={() => setBiddingOn(load)}
+              />
             ))}
           </>
         )}
@@ -91,10 +136,13 @@ export function DriverLoadsScreen(): React.JSX.Element {
 function LoadRow({
   load,
   highlight = false,
+  incentiveInr = 0,
   onBid,
 }: {
   load: Load;
   highlight?: boolean;
+  /** Lane repositioning bonus paid on top of the freight. */
+  incentiveInr?: number;
   onBid: () => void;
 }): React.JSX.Element {
   const t = useTranslation();
@@ -111,6 +159,14 @@ function LoadRow({
         {load.material} · {load.weightTonnes} T · {load.advancePercent}% advance ·{' '}
         {timeAgo(load.postedAt)} · {load.bids.length} bid{load.bids.length === 1 ? '' : 's'}
       </Text>
+      {incentiveInr > 0 && (
+        <View style={styles.bonusRow}>
+          <MaterialCommunityIcons name="lightning-bolt" size={13} color={colors.accent} />
+          <Text style={styles.bonusText}>
+            +{formatINR(incentiveInr)} lane bonus — this route is short of trucks
+          </Text>
+        </View>
+      )}
       {myBid ? (
         <View style={styles.myBidRow}>
           <Ionicons name="checkmark-circle" size={15} color={colors.success} />
@@ -308,6 +364,21 @@ const styles = StyleSheet.create({
   loadMeta: {
     fontSize: fontSizes.xs,
     color: colors.textSecondary,
+  },
+  bonusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accentSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  bonusText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    color: colors.accent,
   },
   myBidRow: {
     flexDirection: 'row',

@@ -15,6 +15,17 @@ import { contractHash, contractText, generateEwayBill } from './compliance';
 import { db, newId, persist } from './db';
 import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
 import {
+  activeGuaranteeFor,
+  buildChain,
+  consolidationGroups,
+  guaranteeOffer,
+  incentiveForLoad,
+  laneDensities,
+  laneIndex,
+  openGuarantee,
+  settleGuarantee,
+} from './marketplace';
+import {
   commitEscrowDeductions,
   createEmiPlan,
   drivingScore,
@@ -208,7 +219,11 @@ app.put('/v1/me', requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 
 app.get('/v1/loads', requireAuth, (_req, res) => {
-  res.json({ loads: db.loads });
+  // Loads carry their lane's repositioning bonus, so the board itself
+  // steers trucks toward deficit lanes without a separate screen.
+  res.json({
+    loads: db.loads.map((l) => ({ ...l, incentiveInr: incentiveForLoad(l) })),
+  });
 });
 
 app.post('/v1/loads', requireAuth, (req, res) => {
@@ -1251,6 +1266,158 @@ app.post('/v1/payments/webhook', (req, res) => {
 // ---------------------------------------------------------------------------
 // Ops console: HTML desk + summary + action endpoints, guarded by OPS_KEY.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Marketplace — network effects. Every endpoint here returns better numbers
+// as liquidity grows, which is the point: the mechanics are copyable, the
+// density that makes them work is not.
+// ---------------------------------------------------------------------------
+
+/** One call powers the driver's marketplace surface. */
+app.get('/v1/market/summary', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const city =
+    typeof req.query.city === 'string' && req.query.city
+      ? req.query.city
+      : (db.shipments.find((s) => s.driverId === user.id && s.stage !== 'BALANCE_RELEASED')
+          ?.destination ?? 'Jaipur');
+
+  res.json({
+    city,
+    guarantee: guaranteeOffer(city),
+    activeGuarantee: activeGuaranteeFor(user.id),
+    lanes: laneDensities(),
+    chain: buildChain(city),
+    consolidation: consolidationGroups(),
+  });
+});
+
+/** Opt into the assured return load for the city the driver is heading to. */
+app.post('/v1/market/guarantee', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const shipment = db.shipments.find((s) => s.id === req.body?.shipmentId);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  const offer = guaranteeOffer(shipment.destination);
+  if (!offer.available) {
+    res.status(409).json({ error: offer.reason });
+    return;
+  }
+  if (db.returnGuarantees.some((g) => g.driverId === user.id && g.status === 'active')) {
+    res.status(409).json({ error: 'You already have an active return guarantee.' });
+    return;
+  }
+  const guarantee = openGuarantee(user.id, shipment.destination, shipment.id);
+  notifyUser({
+    userId: user.id,
+    kind: 'message',
+    title: 'Return load guaranteed',
+    body: `We will find you a load out of ${shipment.destination} within ${offer.windowHours}h, or pay you ₹${offer.standbyFeeInr} standby.`,
+    shipmentId: shipment.id,
+  });
+  res.status(201).json({ guarantee });
+});
+
+/** Claim the standby fee once the window has lapsed unfulfilled. */
+app.post('/v1/market/guarantee/:id/claim', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const guarantee = db.returnGuarantees.find(
+    (g) => g.id === req.params.id && g.driverId === user.id,
+  );
+  if (!guarantee) {
+    res.status(404).json({ error: 'Guarantee not found.' });
+    return;
+  }
+  settleGuarantee(guarantee);
+  if (guarantee.status === 'fulfilled') {
+    res.status(409).json({ error: 'A return load was booked — the guarantee was honoured.' });
+    return;
+  }
+  if (guarantee.status !== 'standby_due') {
+    const hoursLeft = Math.max(0, Math.ceil((guarantee.expiresAt - Date.now()) / 3600000));
+    res.status(409).json({ error: `Still searching — ${hoursLeft}h left in the window.` });
+    return;
+  }
+  try {
+    await executePayout('balance', `standby-${guarantee.id}`, guarantee.standbyFeeInr);
+  } catch (error) {
+    console.error('[market] standby payout failed', error);
+    res.status(502).json({ error: 'Standby payout failed — try again.' });
+    return;
+  }
+  guarantee.status = 'paid';
+  guarantee.paidAt = Date.now();
+  persist();
+  res.json({ guarantee, paidInr: guarantee.standbyFeeInr });
+});
+
+/** Book a chained round trip as one contract. */
+app.post('/v1/market/chain', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const startCity = typeof req.body?.startCity === 'string' ? req.body.startCity : '';
+  const quote = startCity ? buildChain(startCity) : null;
+  if (!quote) {
+    res.status(409).json({ error: 'Not enough open loads to chain a trip from there yet.' });
+    return;
+  }
+  const truckNumber =
+    typeof req.body?.truckNumber === 'string' ? req.body.truckNumber : 'TS 00 XX 0000';
+  const shipments: EscrowShipment[] = [];
+  const chainId = newId('chn');
+
+  quote.legs.forEach((leg, i) => {
+    const load = db.loads.find((l) => l.id === leg.loadId);
+    if (!load || load.status !== 'open') return;
+    load.status = 'booked';
+    // The driver's uplift is spread across the legs pro rata.
+    const legPayout = Math.round(
+      (leg.priceInr / quote.separateTotalInr) * quote.driverPayoutInr,
+    );
+    const shipment: EscrowShipment = {
+      id: newId('shp'),
+      loadId: load.id,
+      origin: load.origin,
+      destination: load.destination,
+      driverName: user.name ?? 'Driver',
+      truckNumber,
+      totalAmountInr: legPayout,
+      advancePercent: load.advancePercent,
+      stage: 'CREATED',
+      pod: null,
+      consignmentNo: load.consignmentNo,
+      disputeId: null,
+      insured: load.insured,
+      chainId,
+      chainLeg: i + 1,
+      chainLegs: quote.legs.length,
+      events: [
+        {
+          stage: 'CREATED',
+          label: `Chained trip leg ${i + 1}/${quote.legs.length} — ${load.origin} → ${load.destination}`,
+          at: Date.now(),
+        },
+      ],
+      dealerId: load.dealerId,
+      driverId: user.id,
+    };
+    db.shipments.unshift(shipment);
+    shipments.push(shipment);
+  });
+
+  if (shipments.length === 0) {
+    res.status(409).json({ error: 'Those loads were taken — refresh and try again.' });
+    return;
+  }
+  persist();
+  res.status(201).json({ chainId, quote, shipments });
+});
+
+/** Public: the TruckSetu lane rate index. No auth — that is the point. */
+app.get('/v1/index/lanes', (_req, res) => {
+  res.json(laneIndex());
+});
 
 // ---------------------------------------------------------------------------
 // TruckSetu Money — the lending flywheel.

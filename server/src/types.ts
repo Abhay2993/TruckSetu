@@ -59,6 +59,8 @@ export interface Load {
   /** Goods-in-transit insurance opted at posting. */
   insured?: boolean;
   insurancePremiumInr?: number;
+  /** Repositioning bonus when this lane is short of trucks (computed on read). */
+  incentiveInr?: number;
   /** Server-only linkage; the app ignores unknown keys. */
   dealerId?: string;
 }
@@ -113,6 +115,10 @@ export interface EscrowShipment {
   ewayBillNumber?: string | null;
   /** Aadhaar-eSigned digital LR/contract state. */
   contract?: ShipmentContract | null;
+  /** Set when this shipment is one leg of a chained round trip. */
+  chainId?: string;
+  chainLeg?: number;
+  chainLegs?: number;
   dealerId?: string;
   driverId?: string;
 }
@@ -360,6 +366,31 @@ export interface BureauQuery {
   at: number;
 }
 
+// ---------------------------------------------------------------------------
+// Marketplace — network effects
+// ---------------------------------------------------------------------------
+
+/**
+ * Assured return load. 'standby_due' means the window lapsed without a
+ * backhaul and TruckSetu owes the driver the standby fee.
+ */
+export interface ReturnGuarantee {
+  id: string;
+  driverId: string;
+  /** The drop city the guarantee is anchored to. */
+  city: string;
+  /** The inbound shipment that earned the guarantee. */
+  shipmentId: string;
+  windowHours: number;
+  standbyFeeInr: number;
+  status: 'active' | 'fulfilled' | 'standby_due' | 'paid';
+  startedAt: number;
+  expiresAt: number;
+  resolvedAt: number | null;
+  fulfilledByShipmentId: string | null;
+  paidAt: number | null;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -382,4 +413,6 @@ export interface DbShape {
   vehicleLoans: VehicleLoanApplication[];
   policies: InsurancePolicy[];
   bureauQueries: BureauQuery[];
+  /** Marketplace. */
+  returnGuarantees: ReturnGuarantee[];
 }

@@ -4,8 +4,8 @@
  * (see useLoadsStore.acceptBid), after which it shows up on the Payments tab.
  */
 
-import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import React, { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Linking,
@@ -22,6 +22,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
+import { consolidationGroups } from '../../services/marketplace';
 import { useLoadsStore } from '../../stores/useLoadsStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Load } from '../../types';
@@ -33,6 +34,10 @@ export function DealerLoadsScreen(): React.JSX.Element {
   const loads = useLoadsStore((s) => s.loads);
   const acceptBid = useLoadsStore((s) => s.acceptBid);
   const [showPostModal, setShowPostModal] = useState(false);
+
+  // Part-loads on the same lane that would fit in one truck. Pure function
+  // of the board, so demo and server mode agree without a round trip.
+  const consolidation = useMemo(() => consolidationGroups(loads), [loads]);
 
   // WhatsApp broadcast — dealers share loads to driver groups all day; this
   // pre-fills the message and opens WhatsApp (wa.me works on web too).
@@ -75,6 +80,27 @@ export function DealerLoadsScreen(): React.JSX.Element {
           <Ionicons name="add-circle" size={20} color={colors.textInverse} />
           <Text style={styles.postButtonText}>{t('bookLoad')}</Text>
         </Pressable>
+
+        {/* Part-load consolidation — only possible with density on a lane */}
+        {consolidation.map((group) => (
+          <View key={group.lane + group.loadIds.join()} style={styles.poolCard}>
+            <View style={styles.poolHead}>
+              <MaterialCommunityIcons name="package-variant-closed" size={17} color={colors.success} />
+              <Text style={styles.poolTitle}>Pool {group.loadIds.length} part-loads</Text>
+              <Text style={styles.poolFill}>{group.fillPercent}% full</Text>
+            </View>
+            <Text style={styles.poolLane}>
+              {group.lane} · {group.totalTonnes} T in one truck
+            </Text>
+            <View style={styles.poolBarTrack}>
+              <View style={[styles.poolBarFill, { width: `${group.fillPercent}%` }]} />
+            </View>
+            <Text style={styles.poolSaving}>
+              {formatINR(group.separateTotalInr)} separately → {formatINR(group.pooledTotalInr)}{' '}
+              pooled · each shipper saves {formatINR(group.savingPerShipperInr)}
+            </Text>
+          </View>
+        ))}
 
         {loads.map((load) => (
           <View key={load.id} style={styles.loadCard}>
@@ -328,6 +354,51 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.sm,
     ...cardShadow,
+  },
+  poolCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.success,
+    ...cardShadow,
+  },
+  poolHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  poolTitle: {
+    flex: 1,
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  poolFill: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    color: colors.success,
+  },
+  poolLane: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  poolBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  poolBarFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.success,
+  },
+  poolSaving: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   loadTop: {
     flexDirection: 'row',

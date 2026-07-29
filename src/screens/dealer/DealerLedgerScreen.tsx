@@ -10,7 +10,7 @@
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArtTrim } from '../../components/ArtTrim';
@@ -25,6 +25,7 @@ import {
 } from '../../services/invoices';
 import { useEscrowStore } from '../../stores/useEscrowStore';
 import { useLoadsStore } from '../../stores/useLoadsStore';
+import { useMarketStore } from '../../stores/useMarketStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import { notify } from '../../utils/dialog';
 import { formatINR } from '../../utils/format';
@@ -52,6 +53,12 @@ export function DealerLedgerScreen(): React.JSX.Element {
   const shipments = useEscrowStore((s) => s.shipments);
   const generateEwayBill = useEscrowStore((s) => s.generateEwayBill);
   const loads = useLoadsStore((s) => s.loads);
+  const index = useMarketStore((s) => s.index);
+  const refreshMarket = useMarketStore((s) => s.refresh);
+
+  useEffect(() => {
+    void refreshMarket();
+  }, [refreshMarket]);
 
   const summary = buildLedgerSummary(shipments);
   const invoices = shipments.map(buildInvoice);
@@ -103,6 +110,61 @@ export function DealerLedgerScreen(): React.JSX.Element {
             </Text>
           </View>
         </LinearGradient>
+
+        {/* The published TruckSetu freight index — the benchmark others quote */}
+        {index && index.lanes.length > 0 && (
+          <View style={styles.indexCard}>
+            <View style={styles.indexHead}>
+              <MaterialCommunityIcons name="chart-line" size={17} color={colors.primary} />
+              <Text style={styles.indexTitle}>TruckSetu Freight Index</Text>
+              <Text
+                style={[
+                  styles.indexLevel,
+                  { color: index.indexLevel >= 100 ? colors.success : colors.danger },
+                ]}
+              >
+                {index.indexLevel.toFixed(1)}
+              </Text>
+            </View>
+            <Text style={styles.indexSub}>
+              7-day rates vs the 30-day baseline (100) · {index.laneCount} lanes ·{' '}
+              {index.tripCount} trips · published openly
+            </Text>
+            {index.lanes.map((row) => (
+              <View key={row.lane} style={styles.indexRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.indexLane}>{row.lane}</Text>
+                  <Text style={styles.indexMeta}>
+                    {row.tripCount} trip{row.tripCount === 1 ? '' : 's'}
+                    {row.perTonneInr ? ` · ${formatINR(row.perTonneInr)}/tonne` : ''}
+                    {row.openAskInr ? ` · asking ${formatINR(row.openAskInr)}` : ''}
+                  </Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={styles.indexRate}>
+                    {row.avg7dInr !== null ? formatINR(row.avg7dInr) : '—'}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.indexTrend,
+                      {
+                        color:
+                          row.direction === 'up'
+                            ? colors.success
+                            : row.direction === 'down'
+                              ? colors.danger
+                              : colors.textMuted,
+                      },
+                    ]}
+                  >
+                    {row.direction === 'up' ? '▲' : row.direction === 'down' ? '▼' : '—'}{' '}
+                    {row.trendPercent !== null ? `${Math.abs(row.trendPercent)}%` : 'new'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Lane-rate analytics */}
         <Text style={styles.sectionTitle}>Lane rates · last 30 days</Text>
@@ -228,6 +290,59 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.textPrimary,
     marginTop: spacing.xs,
+  },
+  indexCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
+    ...cardShadow,
+  },
+  indexHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  indexTitle: {
+    flex: 1,
+    fontSize: fontSizes.md,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  indexLevel: {
+    fontSize: fontSizes.xl,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  indexSub: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+  },
+  indexRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+  },
+  indexLane: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  indexMeta: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+  },
+  indexRate: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  indexTrend: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
   },
   laneCard: {
     backgroundColor: colors.surface,

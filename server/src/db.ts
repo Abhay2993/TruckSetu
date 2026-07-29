@@ -15,6 +15,8 @@ import { DbShape } from './types';
 
 const DATA_FILE = process.env.DATA_FILE ?? path.join(__dirname, '..', 'data.json');
 const SAVE_DEBOUNCE_MS = 250;
+/** Hard ceiling on how long a mutation may sit unwritten under sustained load. */
+const MAX_SAVE_DELAY_MS = 2000;
 
 function seed(): DbShape {
   const now = Date.now();
@@ -77,6 +79,44 @@ function seed(): DbShape {
         bids: [],
         postedAt: now - 15 * 60 * 1000,
       },
+      // Part-loads sharing one lane — the consolidation feature only has
+      // something to pool when the board is dense enough on a single route.
+      {
+        id: 'load-5',
+        origin: 'Pune',
+        destination: 'Nashik',
+        material: 'Auto components',
+        weightTonnes: 6,
+        priceInr: 13200,
+        advancePercent: 60,
+        status: 'open',
+        bids: [],
+        postedAt: now - 40 * 60 * 1000,
+      },
+      {
+        id: 'load-6',
+        origin: 'Pune',
+        destination: 'Nashik',
+        material: 'Packaged food',
+        weightTonnes: 5,
+        priceInr: 11000,
+        advancePercent: 60,
+        status: 'open',
+        bids: [],
+        postedAt: now - 25 * 60 * 1000,
+      },
+      {
+        id: 'load-7',
+        origin: 'Pune',
+        destination: 'Nashik',
+        material: 'Textile bales',
+        weightTonnes: 4,
+        priceInr: 8800,
+        advancePercent: 60,
+        status: 'open',
+        bids: [],
+        postedAt: now - 10 * 60 * 1000,
+      },
     ],
     shipments: [
       {
@@ -129,6 +169,7 @@ function seed(): DbShape {
     vehicleLoans: [],
     policies: [],
     bureauQueries: [],
+    returnGuarantees: [],
   };
 }
 
@@ -151,6 +192,7 @@ function load(): DbShape {
     data.vehicleLoans = data.vehicleLoans ?? [];
     data.policies = data.policies ?? [];
     data.bureauQueries = data.bureauQueries ?? [];
+    data.returnGuarantees = data.returnGuarantees ?? [];
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not
@@ -162,21 +204,52 @@ function load(): DbShape {
 export const db: DbShape = load();
 
 let saveTimer: NodeJS.Timeout | null = null;
+/** When the oldest un-written mutation happened; null when clean. */
+let dirtySince: number | null = null;
 
-/** Debounced atomic write — call after every mutation. */
-export function persist(): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
+/** Atomic write: temp file + rename, so a crash never leaves a partial file. */
+export function flush(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
     saveTimer = null;
-    const tmp = `${DATA_FILE}.tmp`;
-    try {
-      fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-      fs.renameSync(tmp, DATA_FILE);
-    } catch (error) {
-      console.error('[db] persist failed', error);
-    }
-  }, SAVE_DEBOUNCE_MS);
+  }
+  if (dirtySince === null) return;
+  dirtySince = null;
+  const tmp = `${DATA_FILE}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+    fs.renameSync(tmp, DATA_FILE);
+  } catch (error) {
+    console.error('[db] persist failed', error);
+  }
 }
+
+/**
+ * Debounced atomic write — call after every mutation.
+ *
+ * The debounce coalesces bursts, but it is capped by MAX_SAVE_DELAY_MS:
+ * without that ceiling a steady stream of writes keeps resetting the timer
+ * and the file never lands. Pending work is also flushed on shutdown, so a
+ * SIGTERM (deploys, container stops) does not drop the last mutations.
+ */
+export function persist(): void {
+  const now = Date.now();
+  if (dirtySince === null) dirtySince = now;
+  if (now - dirtySince >= MAX_SAVE_DELAY_MS) {
+    flush();
+    return;
+  }
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, SAVE_DEBOUNCE_MS);
+}
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    flush();
+    process.exit(0);
+  });
+}
+process.on('exit', flush);
 
 export function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;

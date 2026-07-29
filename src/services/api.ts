@@ -29,8 +29,11 @@ import type {
   FuelPrice,
   InsurancePolicy,
   InvoiceAdvance,
+  LaneIndex,
   Load,
+  MarketSummary,
   MoneySummary,
+  ReturnGuarantee,
   ProofOfDelivery,
   TelemetryPoint,
   AuthUser,
@@ -522,5 +525,48 @@ export const api = {
   async setBureauConsent(granted: boolean): Promise<void> {
     if (!isServerMode) return;
     await request('/v1/money/bureau/consent', { method: 'PUT', body: { granted } });
+  },
+
+  // -------------------------------------------------------------------------
+  // Marketplace — guarantee, lane density, chaining, consolidation, index
+  // -------------------------------------------------------------------------
+
+  async marketSummary(city?: string): Promise<MarketSummary | null> {
+    if (!isServerMode) return null;
+    const query = city ? `?city=${encodeURIComponent(city)}` : '';
+    return request<MarketSummary>(`/v1/market/summary${query}`);
+  },
+
+  async takeGuarantee(shipmentId: string): Promise<ReturnGuarantee | null> {
+    if (!isServerMode) return null;
+    const { guarantee } = await request<{ guarantee: ReturnGuarantee }>('/v1/market/guarantee', {
+      method: 'POST',
+      body: { shipmentId },
+    });
+    return guarantee;
+  },
+
+  async claimStandby(guaranteeId: string): Promise<{ paidInr: number } | null> {
+    if (!isServerMode) return null;
+    return request<{ paidInr: number }>(`/v1/market/guarantee/${guaranteeId}/claim`, {
+      method: 'POST',
+    });
+  },
+
+  async bookChain(
+    startCity: string,
+    truckNumber: string,
+  ): Promise<{ chainId: string; shipments: EscrowShipment[] } | null> {
+    if (!isServerMode) return null;
+    return request<{ chainId: string; shipments: EscrowShipment[] }>('/v1/market/chain', {
+      method: 'POST',
+      body: { startCity, truckNumber },
+    });
+  },
+
+  /** Public endpoint — no auth needed, by design. */
+  async laneIndex(): Promise<LaneIndex | null> {
+    if (!isServerMode) return null;
+    return request<LaneIndex>('/v1/index/lanes', { anonymous: true });
   },
 };

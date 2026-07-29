@@ -59,6 +59,8 @@ export interface Load {
   /** Goods-in-transit insurance opted at posting. */
   insured?: boolean;
   insurancePremiumInr?: number;
+  /** Repositioning bonus when this lane is short of trucks. */
+  incentiveInr?: number;
 }
 
 export interface Bid {
@@ -138,6 +140,10 @@ export interface EscrowShipment {
   ewayBillNumber?: string | null;
   /** Aadhaar-eSigned digital LR state. */
   contract?: ShipmentContract | null;
+  /** Set when this shipment is one leg of a chained round trip. */
+  chainId?: string;
+  chainLeg?: number;
+  chainLegs?: number;
 }
 
 export interface ShipmentContract {
@@ -384,6 +390,105 @@ export interface InsurancePolicy {
   premiumInr: number;
   validUntil: number;
   at: number;
+}
+
+// ---------------------------------------------------------------------------
+// Marketplace — network effects
+// ---------------------------------------------------------------------------
+
+export interface ReturnGuarantee {
+  id: string;
+  city: string;
+  shipmentId: string;
+  windowHours: number;
+  standbyFeeInr: number;
+  status: 'active' | 'fulfilled' | 'standby_due' | 'paid';
+  startedAt: number;
+  expiresAt: number;
+  resolvedAt: number | null;
+  fulfilledByShipmentId: string | null;
+  paidAt: number | null;
+}
+
+export interface GuaranteeOffer {
+  city: string;
+  available: boolean;
+  openLoads: number;
+  windowHours: number;
+  standbyFeeInr: number;
+  reason: string;
+}
+
+export interface LaneDensity {
+  lane: string;
+  origin: string;
+  destination: string;
+  demand: number;
+  supply: number;
+  gap: number;
+  status: 'deficit' | 'balanced' | 'surplus';
+  incentiveInr: number;
+}
+
+export interface ChainLeg {
+  loadId: string;
+  origin: string;
+  destination: string;
+  material: string;
+  priceInr: number;
+}
+
+export interface TripChainQuote {
+  legs: ChainLeg[];
+  separateTotalInr: number;
+  chainedTotalInr: number;
+  shipperSavesInr: number;
+  driverPayoutInr: number;
+  driverGainsInr: number;
+  returnsToStart: boolean;
+}
+
+export interface ConsolidationGroup {
+  lane: string;
+  origin: string;
+  destination: string;
+  loadIds: string[];
+  totalTonnes: number;
+  fillPercent: number;
+  separateTotalInr: number;
+  pooledTotalInr: number;
+  savingPerShipperInr: number;
+}
+
+export interface LaneIndexRow {
+  lane: string;
+  origin: string;
+  destination: string;
+  avg7dInr: number | null;
+  avg30dInr: number | null;
+  trendPercent: number | null;
+  direction: 'up' | 'down' | 'flat' | 'new';
+  tripCount: number;
+  openAskInr: number | null;
+  perTonneInr: number | null;
+}
+
+export interface LaneIndex {
+  indexLevel: number;
+  laneCount: number;
+  tripCount: number;
+  generatedAt: number;
+  lanes: LaneIndexRow[];
+}
+
+/** Everything the driver's marketplace surface renders. */
+export interface MarketSummary {
+  city: string;
+  guarantee: GuaranteeOffer;
+  activeGuarantee: ReturnGuarantee | null;
+  lanes: LaneDensity[];
+  chain: TripChainQuote | null;
+  consolidation: ConsolidationGroup[];
 }
 
 /** Everything the Money screen renders, in one shape. */

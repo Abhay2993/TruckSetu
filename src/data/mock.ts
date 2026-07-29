@@ -179,6 +179,44 @@ export const SEED_LOADS: Load[] = [
     bids: [],
     postedAt: Date.now() - 1000 * 60 * 15,
   },
+  // Part-loads sharing one lane — small consignments that only become
+  // economic when the board is dense enough to pool them into one truck.
+  {
+    id: 'load-5',
+    origin: 'Pune',
+    destination: 'Nashik',
+    material: 'Auto components',
+    weightTonnes: 6,
+    priceInr: 13200,
+    advancePercent: 60,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now() - 1000 * 60 * 40,
+  },
+  {
+    id: 'load-6',
+    origin: 'Pune',
+    destination: 'Nashik',
+    material: 'Packaged food',
+    weightTonnes: 5,
+    priceInr: 11000,
+    advancePercent: 60,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now() - 1000 * 60 * 25,
+  },
+  {
+    id: 'load-7',
+    origin: 'Pune',
+    destination: 'Nashik',
+    material: 'Textile bales',
+    weightTonnes: 4,
+    priceInr: 8800,
+    advancePercent: 60,
+    status: 'open',
+    bids: [],
+    postedAt: Date.now() - 1000 * 60 * 10,
+  },
 ];
 
 /** Demo-mode diesel prices along the NH-48 corridor. */
