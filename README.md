@@ -48,10 +48,47 @@ native dependencies, so it deploys unchanged to Railway / Render / Fly.
 | Escrow | `GET /v1/shipments`, `POST /v1/shipments/:id/dispatch`, `…/pod`, `…/release` |
 | Telemetry | `POST /v1/telemetry/batch`, `POST /v1/telemetry/live`, `GET /v1/telemetry/stats` |
 | FASTag | `GET /v1/fastag`, `POST /v1/fastag/topup` |
+| Money | `GET /v1/money/summary`, `…/discount`, `…/credit/draw`, `…/credit/repay`, `…/emi`, `…/fuelcard/swipe`, `…/vehicle-loan/apply`, `…/insurance/renew` |
+| Bureau | `GET /v1/bureau/score` (partner API key + user consent) |
 
 The escrow stage machine is enforced **server-side** (releasing before a POD
 exists returns 409) — the app's local checks are UX, the server is truth.
 Env: `PORT`, `JWT_SECRET` (set in production!), `DATA_FILE`, `NODE_ENV`.
+
+## TruckSetu Money (the lending flywheel)
+
+Underwriting runs on data no matching-only competitor has: settled escrow
+trips, verified PODs, dispute history, dealer settlement behaviour and
+driving telemetry. Every settled shipment sharpens the score, which prices
+credit cheaper, which attracts more flow.
+
+| Product | How it is priced |
+| --- | --- |
+| Working-capital line | Revolving, limit sized by TruckScore, 18% p.a. |
+| Bill discounting | Dealer paid day 1; 1.25% per 30 days of tenor |
+| Tyre / repair / battery EMI | 20% p.a. reducing balance, gated at score ≥ 480 |
+| Fuel card | ₹1.50/litre off at partner pumps + 0.5% cashback |
+| Truck loan | APR by score band (12.5%–21%), eligibility by band |
+| Insurance | 2.25% of sum insured, up to 20% off for safe driving |
+| TruckScore bureau | ₹25 per consented partner pull |
+
+**Repayment seniority is the underwriting edge.** TruckSetu controls the
+escrow, so instalments are collected from the driver's own balance release
+before the money leaves the platform (`planEscrowDeductions` →
+`commitEscrowDeductions` in `server/src/money.ts`, applied in the release
+and instant-payout routes). Priority: EMI → fuel card dues → a 25% sweep
+against the drawn line. Deductions are *planned* before the payout and
+*committed* only after it succeeds, so a failed payout never charges the
+driver.
+
+The bureau API requires both a partner key (`BUREAU_API_KEY`) and the
+subject's explicit consent; refused pulls are audited too, and the ops
+console shows the live book (drawn, EMI outstanding, invoices advanced,
+fee income) alongside every query.
+
+> Going live needs an NBFC/lending partner and an RBI co-lending or DLG
+> arrangement. The arithmetic, ledgers and state machines are real; only
+> disbursal/collection swap from simulated to partner rails.
 
 ## Maps
 

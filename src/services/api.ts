@@ -18,17 +18,24 @@ import type {
   AppNotification,
   AutoRechargeRule,
   ChatMessage,
+  CreditFacility,
   Dispute,
   DisputeReason,
   DisputeResolution,
+  EmiPlan,
   EscrowShipment,
   FastagTransaction,
+  FuelCardAccount,
   FuelPrice,
+  InsurancePolicy,
+  InvoiceAdvance,
   Load,
+  MoneySummary,
   ProofOfDelivery,
   TelemetryPoint,
   AuthUser,
   UserRole,
+  VehicleLoanApplication,
 } from '../types';
 import { ApiError, request } from './http';
 
@@ -430,5 +437,90 @@ export const api = {
       '/v1/fastag/toll',
       { method: 'POST', body: { amountInr, plaza } },
     );
+  },
+
+  // -------------------------------------------------------------------------
+  // TruckSetu Money — credit line, EMIs, fuel card, receivables, insurance.
+  // Every call returns null in demo mode; useMoneyStore then applies the
+  // identical transition locally using services/money.ts arithmetic.
+  // -------------------------------------------------------------------------
+
+  async moneySummary(): Promise<MoneySummary | null> {
+    if (!isServerMode) return null;
+    return request<MoneySummary>('/v1/money/summary');
+  },
+
+  async discountInvoice(shipmentId: string, termDays: 30 | 60): Promise<InvoiceAdvance | null> {
+    if (!isServerMode) return null;
+    const { advance } = await request<{ advance: InvoiceAdvance }>('/v1/money/discount', {
+      method: 'POST',
+      body: { shipmentId, termDays },
+    });
+    return advance;
+  },
+
+  async drawCredit(amountInr: number): Promise<CreditFacility | null> {
+    if (!isServerMode) return null;
+    const { facility } = await request<{ facility: CreditFacility }>('/v1/money/credit/draw', {
+      method: 'POST',
+      body: { amountInr },
+    });
+    return facility;
+  },
+
+  async repayCredit(amountInr: number): Promise<CreditFacility | null> {
+    if (!isServerMode) return null;
+    const { facility } = await request<{ facility: CreditFacility }>('/v1/money/credit/repay', {
+      method: 'POST',
+      body: { amountInr },
+    });
+    return facility;
+  },
+
+  async takeEmi(itemId: string, tenorMonths: number): Promise<EmiPlan | null> {
+    if (!isServerMode) return null;
+    const { plan } = await request<{ plan: EmiPlan }>('/v1/money/emi', {
+      method: 'POST',
+      body: { itemId, tenorMonths },
+    });
+    return plan;
+  },
+
+  async swipeFuelCard(
+    pump: string,
+    litres: number,
+  ): Promise<{ card: FuelCardAccount; discountInr: number; cashbackInr: number } | null> {
+    if (!isServerMode) return null;
+    return request<{ card: FuelCardAccount; discountInr: number; cashbackInr: number }>(
+      '/v1/money/fuelcard/swipe',
+      { method: 'POST', body: { pump, litres } },
+    );
+  },
+
+  async applyVehicleLoan(
+    amountInr: number,
+    tenorMonths: number,
+    purpose: 'purchase' | 'refinance',
+  ): Promise<VehicleLoanApplication | null> {
+    if (!isServerMode) return null;
+    const { application } = await request<{ application: VehicleLoanApplication }>(
+      '/v1/money/vehicle-loan/apply',
+      { method: 'POST', body: { amountInr, tenorMonths, purpose } },
+    );
+    return application;
+  },
+
+  async renewInsurance(sumInsuredInr: number): Promise<InsurancePolicy | null> {
+    if (!isServerMode) return null;
+    const { policy } = await request<{ policy: InsurancePolicy }>('/v1/money/insurance/renew', {
+      method: 'POST',
+      body: { sumInsuredInr },
+    });
+    return policy;
+  },
+
+  async setBureauConsent(granted: boolean): Promise<void> {
+    if (!isServerMode) return;
+    await request('/v1/money/bureau/consent', { method: 'PUT', body: { granted } });
   },
 };

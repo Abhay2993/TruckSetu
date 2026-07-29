@@ -61,10 +61,20 @@ async function act(path){ try { await api(path, {method:'POST'}); } catch(e){ al
 async function render(){
   let d;
   try { d = await api('/v1/ops/summary'); } catch(e){ document.getElementById('main').innerHTML = '<section><div class="empty">'+esc(e.message)+'</div></section>'; return; }
-  document.getElementById('meta').textContent = d.sseClients + ' live app(s) · ' + d.userCount + ' users · refreshed ' + new Date().toLocaleTimeString();
+  const inr = n => '₹' + Number(n||0).toLocaleString('en-IN');
+  document.getElementById('meta').textContent =
+    d.sseClients + ' live app(s) · ' + d.userCount + ' users · book ' +
+    inr((d.money?.drawnInr||0) + (d.money?.emiOutstandingInr||0) + (d.money?.advancedInr||0)) +
+    ' · refreshed ' + new Date().toLocaleTimeString();
   const sec = (title, count, rows) =>
     '<section><h2>' + title + ' <span class="count' + (count? '':' zero') + '">' + count + '</span></h2>' + (rows || '<div class="empty">Nothing to act on.</div>') + '</section>';
+  const m = d.money || {};
   document.getElementById('main').innerHTML =
+    sec('🏦 Money book', m.activeEmis || 0,
+      '<div class="row"><div class="grow">Credit line drawn</div><b>'+inr(m.drawnInr)+'</b></div>'+
+      '<div class="row"><div class="grow">EMI outstanding ('+(m.activeEmis||0)+' active)</div><b>'+inr(m.emiOutstandingInr)+'</b></div>'+
+      '<div class="row"><div class="grow">Invoices advanced</div><b>'+inr(m.advancedInr)+'</b></div>'+
+      '<div class="row"><div class="grow">Fee income (discount + bureau)</div><b>'+inr((m.discountFeesInr||0)+(m.bureauFeesInr||0))+'</b></div>') +
     sec('🚨 SOS — live', d.sos.length, d.sos.map(a =>
       '<div class="row"><div class="grow"><b>'+esc(a.phone)+'</b><div class="sub">'+ (a.latitude? a.latitude.toFixed(3)+', '+a.longitude.toFixed(3) : 'no fix') +' · '+ago(a.at)+'</div></div>'+
       '<button onclick="act(\\'/v1/ops/sos/'+a.id+'/resolve\\')">Mark safe</button></div>').join('')) +
@@ -78,7 +88,9 @@ async function render(){
       '<div class="row"><div class="grow"><b>'+esc(u.phone)+'</b><div class="sub">'+esc(u.name||'unnamed')+' · '+esc(u.role||'no role')+'</div></div>'+
       '<button onclick="act(\\'/v1/ops/kyc/'+u.id+'/verify\\')">Verify</button></div>').join('')) +
     sec('💬 WhatsApp outbox', d.whatsapp.length, d.whatsapp.map(w =>
-      '<div class="row"><span class="pill '+(w.mode==='cloud-api'?'green':'amber')+'">'+esc(w.mode)+'</span><div class="grow">'+esc(w.text.slice(0,90))+'<div class="sub">→ '+esc(w.to)+' · '+ago(w.at)+'</div></div></div>').join(''));
+      '<div class="row"><span class="pill '+(w.mode==='cloud-api'?'green':'amber')+'">'+esc(w.mode)+'</span><div class="grow">'+esc(w.text.slice(0,90))+'<div class="sub">→ '+esc(w.to)+' · '+ago(w.at)+'</div></div></div>').join('')) +
+    sec('🏦 Bureau pulls', d.bureau.length, d.bureau.map(q =>
+      '<div class="row"><span class="pill '+(q.score?'green':'red')+'">'+(q.score?esc(String(q.score)):'denied')+'</span><div class="grow"><b>'+esc(q.partner)+'</b><div class="sub">'+esc(q.subjectPhone)+' · ₹'+q.feeInr+' · '+ago(q.at)+'</div></div></div>').join(''));
 }
 render();
 setInterval(render, 10000);

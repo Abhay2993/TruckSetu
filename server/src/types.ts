@@ -17,6 +17,8 @@ export interface User {
   pushToken?: string | null;
   /** Mirror notifications/OTPs to WhatsApp when true. */
   whatsappOptIn?: boolean;
+  /** Consent for lending partners to pull this user's TruckScore. */
+  bureauConsent?: boolean;
   createdAt: number;
 }
 
@@ -234,6 +236,130 @@ export interface WhatsAppOutboxEntry {
   at: number;
 }
 
+// ---------------------------------------------------------------------------
+// TruckSetu Money — credit, EMIs, fuel card, receivables, bureau
+// ---------------------------------------------------------------------------
+
+/** Per-user safety telemetry, the input to insurance pricing. */
+export interface DrivingStats {
+  points: number;
+  overspeedEvents: number;
+  harshEvents: number;
+  nightPoints: number;
+  lastAt: number | null;
+}
+
+export interface CreditDraw {
+  id: string;
+  amountInr: number;
+  at: number;
+  referenceId: string;
+}
+
+export interface CreditRepayment {
+  id: string;
+  amountInr: number;
+  at: number;
+  /** 'escrow' = auto-swept from a balance release (repayment seniority). */
+  source: 'manual' | 'escrow';
+}
+
+/** Revolving working-capital line, one per user. */
+export interface CreditFacility {
+  userId: string;
+  limitInr: number;
+  drawnInr: number;
+  aprPercent: number;
+  draws: CreditDraw[];
+  repayments: CreditRepayment[];
+  updatedAt: number;
+}
+
+export interface EmiPlan {
+  id: string;
+  userId: string;
+  itemId: string;
+  itemLabel: string;
+  principalInr: number;
+  tenorMonths: number;
+  monthlyInr: number;
+  aprPercent: number;
+  paidInstalments: number;
+  outstandingInr: number;
+  status: 'active' | 'closed';
+  at: number;
+}
+
+export interface FuelCardTransaction {
+  id: string;
+  pump: string;
+  city: string;
+  litres: number;
+  amountInr: number;
+  discountInr: number;
+  cashbackInr: number;
+  at: number;
+}
+
+export interface FuelCardAccount {
+  userId: string;
+  last4: string;
+  creditLimitInr: number;
+  outstandingInr: number;
+  litresThisMonth: number;
+  savedInr: number;
+  transactions: FuelCardTransaction[];
+  issuedAt: number;
+}
+
+/** A discounted dealer receivable: paid out on day 1, collected at maturity. */
+export interface InvoiceAdvance {
+  id: string;
+  userId: string;
+  shipmentId: string;
+  invoiceNo: string;
+  faceValueInr: number;
+  feeInr: number;
+  netInr: number;
+  termDays: number;
+  dueAt: number;
+  status: 'advanced' | 'collected';
+  at: number;
+}
+
+export interface VehicleLoanApplication {
+  id: string;
+  userId: string;
+  purpose: 'purchase' | 'refinance';
+  amountInr: number;
+  tenorMonths: number;
+  aprPercent: number;
+  emiInr: number;
+  status: 'submitted' | 'approved' | 'rejected';
+  at: number;
+}
+
+export interface InsurancePolicy {
+  id: string;
+  userId: string;
+  sumInsuredInr: number;
+  basePremiumInr: number;
+  discountPercent: number;
+  premiumInr: number;
+  validUntil: number;
+  at: number;
+}
+
+/** An audited third-party score pull — the bureau product. */
+export interface BureauQuery {
+  id: string;
+  partner: string;
+  subjectPhone: string;
+  score: number | null;
+  feeInr: number;
+  at: number;
+}
+
 export interface DbShape {
   users: User[];
   loads: Load[];
@@ -247,4 +373,13 @@ export interface DbShape {
   disputes: Dispute[];
   whatsappOutbox: WhatsAppOutboxEntry[];
   fraudAlerts: FraudAlert[];
+  /** Money: all keyed collections below are per user id where noted. */
+  driving: Record<string, DrivingStats>;
+  credit: Record<string, CreditFacility>;
+  fuelCards: Record<string, FuelCardAccount>;
+  emis: EmiPlan[];
+  advances: InvoiceAdvance[];
+  vehicleLoans: VehicleLoanApplication[];
+  policies: InsurancePolicy[];
+  bureauQueries: BureauQuery[];
 }

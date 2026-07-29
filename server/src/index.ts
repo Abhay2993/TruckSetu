@@ -14,6 +14,24 @@ import { AuthedRequest, IS_DEV, normalizePhone, requestOtp, requireAuth, verifyO
 import { contractHash, contractText, generateEwayBill } from './compliance';
 import { db, newId, persist } from './db';
 import { checkPodDuplicate, checkTelemetryBatch } from './fraud';
+import {
+  commitEscrowDeductions,
+  createEmiPlan,
+  drivingScore,
+  EMI_CATALOGUE,
+  ensureFacility,
+  ensureFuelCard,
+  insuranceQuote,
+  invoiceFaceValue,
+  MONEY,
+  PARTNER_PUMPS,
+  planEscrowDeductions,
+  quoteDiscount,
+  recordDrivingPoints,
+  scoreFor,
+  swipeFuelCard,
+  vehicleLoanQuote,
+} from './money';
 import { notifyUser } from './notify';
 import { OPS_CONSOLE_HTML, opsAuthorized } from './ops';
 import { connectedClientCount, pushEventTo, registerSseClient } from './realtime';
@@ -33,8 +51,10 @@ import {
   EscrowShipment,
   FastagWallet,
   FuelPrice,
+  InvoiceAdvance,
   Load,
   TelemetryPoint,
+  VehicleLoanApplication,
 } from './types';
 
 const app = express();
@@ -459,27 +479,39 @@ app.post('/v1/shipments/:id/release', requireAuth, async (req, res) => {
     return;
   }
   const { balanceInr } = splitAmounts(shipment);
+  // Repayment seniority: the driver's TruckSetu Money obligations are
+  // collected from their own escrow money before it leaves the platform.
+  // Planned first, committed only after the payout lands — a failed payout
+  // must never leave the driver charged for money they did not receive.
+  const plan = shipment.driverId
+    ? planEscrowDeductions(shipment.driverId, balanceInr)
+    : { netInr: balanceInr, deductions: [] };
   let referenceId: string;
   try {
-    ({ referenceId } = await executePayout('balance', shipment.id, balanceInr));
+    ({ referenceId } = await executePayout('balance', shipment.id, plan.netInr));
   } catch (error) {
     console.error('[payments] balance payout failed', error);
     res.status(502).json({ error: 'Balance payout failed — try releasing again.' });
     return;
   }
+  if (shipment.driverId) commitEscrowDeductions(shipment.driverId, plan);
+  const netInr = plan.netInr;
   shipment.stage = 'BALANCE_RELEASED';
   pushEvent(shipment, `Balance released from escrow (ref ${referenceId})`);
+  for (const d of plan.deductions) {
+    pushEvent(shipment, `Auto-deducted ₹${d.amountInr} — ${d.label}`);
+  }
   persist();
   if (shipment.driverId) {
     notifyUser({
       userId: shipment.driverId,
       kind: 'balance_released',
       title: 'Balance released!',
-      body: `${balanceInr} paid for ${shipment.origin} → ${shipment.destination}. Trip settled.`,
+      body: `${netInr} paid for ${shipment.origin} → ${shipment.destination}. Trip settled.`,
       shipmentId: shipment.id,
     });
   }
-  res.json({ shipment });
+  res.json({ shipment, netInr, deductions: plan.deductions });
 });
 
 /**
@@ -506,7 +538,13 @@ app.post('/v1/shipments/:id/instant-payout', requireAuth, async (req, res) => {
   }
   const { balanceInr } = splitAmounts(shipment);
   const feeInr = Math.max(49, Math.round(balanceInr * INSTANT_PAYOUT_FEE_RATE));
-  const netInr = balanceInr - feeInr;
+  const afterFeeInr = balanceInr - feeInr;
+  // Same seniority rule as a normal release — cashing out early does not
+  // jump the queue ahead of TruckSetu Money obligations.
+  const plan = shipment.driverId
+    ? planEscrowDeductions(shipment.driverId, afterFeeInr)
+    : { netInr: afterFeeInr, deductions: [] };
+  const netInr = plan.netInr;
 
   let referenceId: string;
   try {
@@ -516,6 +554,7 @@ app.post('/v1/shipments/:id/instant-payout', requireAuth, async (req, res) => {
     res.status(502).json({ error: 'Instant payout failed — try again.' });
     return;
   }
+  if (shipment.driverId) commitEscrowDeductions(shipment.driverId, plan);
 
   shipment.stage = 'BALANCE_RELEASED';
   shipment.instantPayoutFeeInr = feeInr;
@@ -523,6 +562,9 @@ app.post('/v1/shipments/:id/instant-payout', requireAuth, async (req, res) => {
     shipment,
     `Instant payout: ${netInr} paid now (fee ${feeInr} @ 1.5%, ref ${referenceId})`,
   );
+  for (const d of plan.deductions) {
+    pushEvent(shipment, `Auto-deducted ₹${d.amountInr} — ${d.label}`);
+  }
   persist();
   if (shipment.dealerId) {
     notifyUser({
@@ -705,8 +747,11 @@ app.post('/v1/telemetry/batch', requireAuth, (req, res) => {
   db.telemetry.lastSyncAt = syncedAt;
   db.telemetry.lastPoint = points[points.length - 1] ?? db.telemetry.lastPoint;
   persist();
+  const userId = (req as AuthedRequest).user.id;
   // Fraud screening: impossible speeds and corridor deviation.
-  checkTelemetryBatch(points, (req as AuthedRequest).user.id);
+  checkTelemetryBatch(points, userId);
+  // Safety scoring: the input to telemetry-priced insurance.
+  recordDrivingPoints(userId, points);
   res.json({ syncedCount: points.length, syncedAt });
 });
 
@@ -1207,6 +1252,360 @@ app.post('/v1/payments/webhook', (req, res) => {
 // Ops console: HTML desk + summary + action endpoints, guarded by OPS_KEY.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TruckSetu Money — the lending flywheel.
+//
+// Underwriting runs on platform data (escrow history, PODs, disputes,
+// telemetry) rather than bureau files, and repayment is senior because the
+// instalments come out of the borrower's own escrow release. Disbursal and
+// collection route through the existing payments module, so switching from
+// simulated to a real NBFC partner is a credentials change, not a rewrite.
+// ---------------------------------------------------------------------------
+
+/** One call powers the whole Money screen. */
+app.get('/v1/money/summary', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const score = scoreFor(user.id, user.role ?? null);
+  const facility = ensureFacility(user.id, user.role ?? null);
+  const card = ensureFuelCard(user.id);
+  const driving = drivingScore(user.id);
+
+  // Dealer receivables that are eligible for day-1 discounting: settled
+  // shipments that have not already been advanced against.
+  const advancedIds = new Set(db.advances.map((a) => a.shipmentId));
+  const discountable = db.shipments
+    .filter(
+      (s) =>
+        s.dealerId === user.id &&
+        s.stage === 'BALANCE_RELEASED' &&
+        !advancedIds.has(s.id) &&
+        !s.disputeId,
+    )
+    .map((s) => ({
+      shipmentId: s.id,
+      invoiceNo: `TS-INV-${s.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`,
+      route: `${s.origin} → ${s.destination}`,
+      faceValueInr: invoiceFaceValue(s),
+      quote30: quoteDiscount(s, 30),
+      quote60: quoteDiscount(s, 60),
+    }));
+
+  res.json({
+    score,
+    driving,
+    facility: {
+      limitInr: facility.limitInr,
+      drawnInr: facility.drawnInr,
+      availableInr: Math.max(0, facility.limitInr - facility.drawnInr),
+      aprPercent: facility.aprPercent,
+      draws: facility.draws.slice(0, 10),
+      repayments: facility.repayments.slice(0, 10),
+    },
+    fuelCard: card,
+    pumps: PARTNER_PUMPS,
+    emiCatalogue: EMI_CATALOGUE,
+    emis: db.emis.filter((e) => e.userId === user.id),
+    advances: db.advances.filter((a) => a.userId === user.id),
+    discountable,
+    vehicleLoans: db.vehicleLoans.filter((l) => l.userId === user.id),
+    policies: db.policies.filter((p) => p.userId === user.id),
+    insuranceQuote: insuranceQuote(user.id, 800000),
+    bureauConsent: user.bureauConsent === true,
+  });
+});
+
+/** Bill discounting: dealer is paid on day 1, TruckSetu collects at maturity. */
+app.post('/v1/money/discount', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const shipment = db.shipments.find((s) => s.id === req.body?.shipmentId);
+  const termDays = Number(req.body?.termDays);
+  if (!shipment) {
+    res.status(404).json({ error: 'Shipment not found.' });
+    return;
+  }
+  if (termDays !== 30 && termDays !== 60) {
+    res.status(400).json({ error: 'termDays must be 30 or 60.' });
+    return;
+  }
+  if (shipment.stage !== 'BALANCE_RELEASED') {
+    res.status(409).json({ error: 'Only a settled shipment has a receivable to discount.' });
+    return;
+  }
+  if (db.advances.some((a) => a.shipmentId === shipment.id)) {
+    res.status(409).json({ error: 'This invoice has already been discounted.' });
+    return;
+  }
+  const quote = quoteDiscount(shipment, termDays);
+  try {
+    await executePayout('balance', shipment.id, quote.netInr);
+  } catch (error) {
+    console.error('[money] discount disbursal failed', error);
+    res.status(502).json({ error: 'Disbursal failed — try again.' });
+    return;
+  }
+  const advance: InvoiceAdvance = {
+    id: newId('adv'),
+    userId: user.id,
+    shipmentId: shipment.id,
+    invoiceNo: `TS-INV-${shipment.id.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase()}`,
+    faceValueInr: quote.faceValueInr,
+    feeInr: quote.feeInr,
+    netInr: quote.netInr,
+    termDays,
+    dueAt: quote.dueAt,
+    status: 'advanced',
+    at: Date.now(),
+  };
+  db.advances.unshift(advance);
+  pushEvent(shipment, `Invoice discounted: ₹${quote.netInr} paid now (fee ₹${quote.feeInr})`);
+  persist();
+  res.status(201).json({ advance });
+});
+
+/** Draw on the revolving working-capital line. */
+app.post('/v1/money/credit/draw', requireAuth, async (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.body?.amountInr));
+  const facility = ensureFacility(user.id, user.role ?? null);
+  if (!Number.isFinite(amountInr) || amountInr <= 0) {
+    res.status(400).json({ error: 'amountInr must be a positive number.' });
+    return;
+  }
+  const available = facility.limitInr - facility.drawnInr;
+  if (amountInr > available) {
+    res.status(409).json({ error: `Only ₹${available} available on your line.` });
+    return;
+  }
+  let referenceId: string;
+  try {
+    ({ referenceId } = await executePayout('balance', `credit-${user.id}`, amountInr));
+  } catch (error) {
+    console.error('[money] credit draw failed', error);
+    res.status(502).json({ error: 'Disbursal failed — try again.' });
+    return;
+  }
+  facility.drawnInr += amountInr;
+  facility.draws.unshift({ id: newId('drw'), amountInr, at: Date.now(), referenceId });
+  facility.updatedAt = Date.now();
+  persist();
+  res.status(201).json({ facility, referenceId });
+});
+
+app.post('/v1/money/credit/repay', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.body?.amountInr));
+  const facility = ensureFacility(user.id, user.role ?? null);
+  if (!Number.isFinite(amountInr) || amountInr <= 0) {
+    res.status(400).json({ error: 'amountInr must be a positive number.' });
+    return;
+  }
+  const applied = Math.min(amountInr, facility.drawnInr);
+  facility.drawnInr -= applied;
+  facility.repayments.unshift({ id: newId('rep'), amountInr: applied, at: Date.now(), source: 'manual' });
+  facility.updatedAt = Date.now();
+  persist();
+  res.json({ facility, appliedInr: applied });
+});
+
+/** Point-of-need EMI: tyres, repairs, batteries — repaid from escrow. */
+app.post('/v1/money/emi', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const item = EMI_CATALOGUE.find((i) => i.id === req.body?.itemId);
+  const tenorMonths = Math.round(Number(req.body?.tenorMonths));
+  if (!item) {
+    res.status(400).json({ error: `itemId must be one of ${EMI_CATALOGUE.map((i) => i.id).join(', ')}.` });
+    return;
+  }
+  if (![3, 6, 9, 12].includes(tenorMonths)) {
+    res.status(400).json({ error: 'tenorMonths must be 3, 6, 9 or 12.' });
+    return;
+  }
+  const score = scoreFor(user.id, user.role ?? null).score;
+  if (score < 480) {
+    res.status(409).json({
+      error: 'Build your TruckScore above 480 with settled trips to unlock EMIs.',
+    });
+    return;
+  }
+  const plan = createEmiPlan(user.id, item.id, item.label, item.priceInr, tenorMonths);
+  notifyUser({
+    userId: user.id,
+    kind: 'message',
+    title: 'EMI approved',
+    body: `${item.label}: ₹${plan.monthlyInr}/month for ${tenorMonths} months, auto-paid from your trip settlements.`,
+  });
+  res.status(201).json({ plan });
+});
+
+/** Co-branded fuel card: rebate per litre plus cashback at partner pumps. */
+app.get('/v1/money/fuelcard', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  res.json({ card: ensureFuelCard(user.id), pumps: PARTNER_PUMPS });
+});
+
+app.post('/v1/money/fuelcard/swipe', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const litres = Number(req.body?.litres);
+  const pump = typeof req.body?.pump === 'string' ? req.body.pump : PARTNER_PUMPS[0].name;
+  if (!Number.isFinite(litres) || litres <= 0 || litres > 500) {
+    res.status(400).json({ error: 'litres must be between 1 and 500.' });
+    return;
+  }
+  const card = ensureFuelCard(user.id);
+  const projected = card.outstandingInr + Math.round(litres * 90);
+  if (projected > card.creditLimitInr) {
+    res.status(409).json({ error: `Fuel card limit ₹${card.creditLimitInr} would be exceeded.` });
+    return;
+  }
+  const result = swipeFuelCard(user.id, pump, litres);
+  res.status(201).json({ ...result, card: db.fuelCards[user.id] });
+});
+
+/** Truck purchase / refinance — score-priced APR. */
+app.get('/v1/money/vehicle-loan/quote', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.query.amountInr ?? 1200000));
+  const tenorMonths = Math.round(Number(req.query.tenorMonths ?? 48));
+  if (!Number.isFinite(amountInr) || amountInr <= 0 || !Number.isFinite(tenorMonths) || tenorMonths < 6) {
+    res.status(400).json({ error: 'amountInr and tenorMonths (>= 6) are required.' });
+    return;
+  }
+  const score = scoreFor(user.id, user.role ?? null).score;
+  res.json(vehicleLoanQuote(score, amountInr, tenorMonths));
+});
+
+app.post('/v1/money/vehicle-loan/apply', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const amountInr = Math.round(Number(req.body?.amountInr));
+  const tenorMonths = Math.round(Number(req.body?.tenorMonths));
+  const purpose = req.body?.purpose === 'refinance' ? 'refinance' : 'purchase';
+  if (!Number.isFinite(amountInr) || amountInr <= 0 || !Number.isFinite(tenorMonths) || tenorMonths < 6) {
+    res.status(400).json({ error: 'amountInr and tenorMonths (>= 6) are required.' });
+    return;
+  }
+  const score = scoreFor(user.id, user.role ?? null).score;
+  const quote = vehicleLoanQuote(score, amountInr, tenorMonths);
+  const application: VehicleLoanApplication = {
+    id: newId('vl'),
+    userId: user.id,
+    purpose,
+    amountInr,
+    tenorMonths,
+    aprPercent: quote.aprPercent,
+    emiInr: quote.emiInr,
+    // In-principle decision from the platform's own data; the lending
+    // partner's final sanction follows KYC + vehicle valuation.
+    status: quote.eligible ? 'approved' : 'rejected',
+    at: Date.now(),
+  };
+  db.vehicleLoans.unshift(application);
+  persist();
+  res.status(201).json({ application, quote });
+});
+
+/** Insurance priced on telemetry the platform already owns. */
+app.get('/v1/money/insurance/quote', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const sumInsuredInr = Math.round(Number(req.query.sumInsuredInr ?? 800000));
+  if (!Number.isFinite(sumInsuredInr) || sumInsuredInr <= 0) {
+    res.status(400).json({ error: 'sumInsuredInr must be a positive number.' });
+    return;
+  }
+  res.json(insuranceQuote(user.id, sumInsuredInr));
+});
+
+app.post('/v1/money/insurance/renew', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  const sumInsuredInr = Math.round(Number(req.body?.sumInsuredInr ?? 800000));
+  if (!Number.isFinite(sumInsuredInr) || sumInsuredInr <= 0) {
+    res.status(400).json({ error: 'sumInsuredInr must be a positive number.' });
+    return;
+  }
+  const quote = insuranceQuote(user.id, sumInsuredInr);
+  const policy = {
+    id: newId('pol'),
+    userId: user.id,
+    sumInsuredInr,
+    basePremiumInr: quote.basePremiumInr,
+    discountPercent: quote.discountPercent,
+    premiumInr: quote.premiumInr,
+    validUntil: Date.now() + 365 * 24 * 3600 * 1000,
+    at: Date.now(),
+  };
+  db.policies.unshift(policy);
+  persist();
+  res.status(201).json({ policy });
+});
+
+/** Consent gate for the bureau — the user owns their score. */
+app.put('/v1/money/bureau/consent', requireAuth, (req, res) => {
+  const { user } = req as AuthedRequest;
+  user.bureauConsent = req.body?.granted === true;
+  persist();
+  res.json({ bureauConsent: user.bureauConsent });
+});
+
+// ---------------------------------------------------------------------------
+// TruckScore bureau — lending partners query scores for a fee. Turning the
+// score into an industry reference is itself the moat: rivals end up pricing
+// their own risk off TruckSetu's data.
+// ---------------------------------------------------------------------------
+
+const BUREAU_KEY = process.env.BUREAU_API_KEY ?? 'trucksetu-bureau-dev';
+
+app.get('/v1/bureau/score', (req, res) => {
+  const key = req.header('X-Bureau-Key') ?? '';
+  const partner = req.header('X-Bureau-Partner') ?? 'unknown';
+  if (key !== BUREAU_KEY) {
+    res.status(401).json({ error: 'Invalid bureau API key.' });
+    return;
+  }
+  const phone = normalizePhone(req.query.phone);
+  if (!phone) {
+    res.status(400).json({ error: 'phone (10-digit) is required.' });
+    return;
+  }
+  const subject = db.users.find((u) => u.phone === phone);
+  // Consent is mandatory — no consent, no score, and the attempt is audited.
+  if (!subject || subject.bureauConsent !== true) {
+    db.bureauQueries.unshift({
+      id: newId('bq'),
+      partner,
+      subjectPhone: phone,
+      score: null,
+      feeInr: 0,
+      at: Date.now(),
+    });
+    persist();
+    res.status(403).json({ error: 'No consent on record for this subject.' });
+    return;
+  }
+  const score = scoreFor(subject.id, subject.role ?? null);
+  const driving = drivingScore(subject.id);
+  db.bureauQueries.unshift({
+    id: newId('bq'),
+    partner,
+    subjectPhone: phone,
+    score: score.score,
+    feeInr: MONEY.BUREAU_QUERY_FEE_INR,
+    at: Date.now(),
+  });
+  if (db.bureauQueries.length > 500) db.bureauQueries.length = 500;
+  persist();
+  res.json({
+    subjectPhone: phone,
+    truckScore: score.score,
+    band: score.band,
+    factors: score.factors,
+    drivingScore: driving?.score ?? null,
+    settledTrips: db.shipments.filter(
+      (s) => s.driverId === subject.id && s.stage === 'BALANCE_RELEASED',
+    ).length,
+    queryFeeInr: MONEY.BUREAU_QUERY_FEE_INR,
+    generatedAt: Date.now(),
+  });
+});
+
 app.get('/ops', (req, res) => {
   if (!opsAuthorized(req)) {
     res.status(401).send('Add ?key=<OPS_KEY> to the URL.');
@@ -1233,6 +1632,16 @@ app.get('/v1/ops/summary', (req, res) => {
       role: u.role,
     })),
     whatsapp: db.whatsappOutbox.slice(0, 10),
+    bureau: db.bureauQueries.slice(0, 10),
+    /** Money book: what the platform has lent and earned. */
+    money: {
+      drawnInr: Object.values(db.credit).reduce((a, f) => a + f.drawnInr, 0),
+      activeEmis: db.emis.filter((e) => e.status === 'active').length,
+      emiOutstandingInr: db.emis.reduce((a, e) => a + e.outstandingInr, 0),
+      advancedInr: db.advances.reduce((a, x) => a + x.netInr, 0),
+      discountFeesInr: db.advances.reduce((a, x) => a + x.feeInr, 0),
+      bureauFeesInr: db.bureauQueries.reduce((a, q) => a + q.feeInr, 0),
+    },
   });
 });
 

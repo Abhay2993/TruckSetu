@@ -261,3 +261,149 @@ export interface DriverDocument {
   expiresOn: string | null;
   addedAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// TruckSetu Money — mirrors server/src/types.ts
+// ---------------------------------------------------------------------------
+
+export interface ScoreFactor {
+  label: string;
+  value: string;
+  positive: boolean;
+}
+
+export interface PlatformScore {
+  score: number;
+  band: 'Building' | 'Fair' | 'Good' | 'Excellent';
+  factors: ScoreFactor[];
+}
+
+export interface DrivingScore {
+  score: number;
+  band: 'Needs work' | 'Fair' | 'Safe' | 'Elite';
+  discountPercent: number;
+  sampleSize: number;
+}
+
+export interface CreditDraw {
+  id: string;
+  amountInr: number;
+  at: number;
+  referenceId: string;
+}
+
+export interface CreditRepayment {
+  id: string;
+  amountInr: number;
+  at: number;
+  source: 'manual' | 'escrow';
+}
+
+export interface CreditFacility {
+  limitInr: number;
+  drawnInr: number;
+  availableInr: number;
+  aprPercent: number;
+  draws: CreditDraw[];
+  repayments: CreditRepayment[];
+}
+
+export interface EmiPlan {
+  id: string;
+  itemId: string;
+  itemLabel: string;
+  principalInr: number;
+  tenorMonths: number;
+  monthlyInr: number;
+  aprPercent: number;
+  paidInstalments: number;
+  outstandingInr: number;
+  status: 'active' | 'closed';
+  at: number;
+}
+
+export interface FuelCardTransaction {
+  id: string;
+  pump: string;
+  city: string;
+  litres: number;
+  amountInr: number;
+  discountInr: number;
+  cashbackInr: number;
+  at: number;
+}
+
+export interface FuelCardAccount {
+  last4: string;
+  creditLimitInr: number;
+  outstandingInr: number;
+  litresThisMonth: number;
+  savedInr: number;
+  transactions: FuelCardTransaction[];
+}
+
+export interface InvoiceAdvance {
+  id: string;
+  shipmentId: string;
+  invoiceNo: string;
+  faceValueInr: number;
+  feeInr: number;
+  netInr: number;
+  termDays: number;
+  dueAt: number;
+  status: 'advanced' | 'collected';
+  at: number;
+}
+
+/** A settled receivable the dealer can turn into cash today. */
+export interface DiscountableInvoice {
+  shipmentId: string;
+  invoiceNo: string;
+  route: string;
+  faceValueInr: number;
+  quote30: { faceValueInr: number; feeInr: number; netInr: number; dueAt: number };
+  quote60: { faceValueInr: number; feeInr: number; netInr: number; dueAt: number };
+}
+
+export interface VehicleLoanApplication {
+  id: string;
+  purpose: 'purchase' | 'refinance';
+  amountInr: number;
+  tenorMonths: number;
+  aprPercent: number;
+  emiInr: number;
+  status: 'submitted' | 'approved' | 'rejected';
+  at: number;
+}
+
+export interface InsurancePolicy {
+  id: string;
+  sumInsuredInr: number;
+  basePremiumInr: number;
+  discountPercent: number;
+  premiumInr: number;
+  validUntil: number;
+  at: number;
+}
+
+/** Everything the Money screen renders, in one shape. */
+export interface MoneySummary {
+  score: PlatformScore;
+  driving: DrivingScore | null;
+  facility: CreditFacility;
+  fuelCard: FuelCardAccount;
+  emis: EmiPlan[];
+  advances: InvoiceAdvance[];
+  discountable: DiscountableInvoice[];
+  vehicleLoans: VehicleLoanApplication[];
+  policies: InsurancePolicy[];
+  insuranceQuote: {
+    sumInsuredInr: number;
+    basePremiumInr: number;
+    drivingScore: number | null;
+    discountPercent: number;
+    premiumInr: number;
+    savedInr: number;
+  };
+  bureauConsent: boolean;
+}

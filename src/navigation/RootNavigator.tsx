@@ -26,6 +26,7 @@ import { DriverLoadsScreen } from '../screens/driver/DriverLoadsScreen';
 import { DriverRouteScreen } from '../screens/driver/DriverRouteScreen';
 import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
+import { MoneyScreen } from '../screens/shared/MoneyScreen';
 import { PaymentEscrowDashboard } from '../screens/shared/PaymentEscrowDashboard';
 import { registerForPush } from '../services/push';
 import { connectRealtime, disconnectRealtime } from '../services/realtime';
@@ -38,6 +39,7 @@ export type DriverTabParamList = {
   Route: undefined;
   Loads: undefined;
   Trips: undefined;
+  Money: undefined;
   Docs: undefined;
   Payments: undefined;
 };
@@ -46,6 +48,7 @@ export type DealerTabParamList = {
   Loads: undefined;
   Fleet: undefined;
   Ledger: undefined;
+  Money: undefined;
   Payments: undefined;
 };
 
@@ -71,7 +74,8 @@ const tabScreenOptions = {
     shadowOffset: { width: 0, height: -4 },
     elevation: 14,
   },
-  tabBarLabelStyle: { fontWeight: '700' as const },
+  // 10px keeps six labels un-truncated at 390pt (the narrowest phone we target).
+  tabBarLabelStyle: { fontWeight: '700' as const, fontSize: 10 },
 };
 
 function DriverTabs(): React.JSX.Element {
@@ -103,6 +107,15 @@ function DriverTabs(): React.JSX.Element {
         }}
       />
       <DriverTab.Screen
+        name="Money"
+        component={MoneyScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bank" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
         name="Docs"
         component={DocumentsScreen}
         options={{
@@ -115,6 +128,9 @@ function DriverTabs(): React.JSX.Element {
         name="Payments"
         component={PaymentEscrowDashboard}
         options={{
+          // "Escrow" over "Payments": it fits the six-tab bar without
+          // truncating, and reads unambiguously next to the Money tab.
+          tabBarLabel: 'Escrow',
           tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
         }}
       />
@@ -147,6 +163,15 @@ function DealerTabs(): React.JSX.Element {
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="notebook-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <DealerTab.Screen
+        name="Money"
+        component={MoneyScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bank" size={size} color={color} />
           ),
         }}
       />

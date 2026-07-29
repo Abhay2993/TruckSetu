@@ -121,6 +121,14 @@ function seed(): DbShape {
     disputes: [],
     whatsappOutbox: [],
     fraudAlerts: [],
+    driving: {},
+    credit: {},
+    fuelCards: {},
+    emis: [],
+    advances: [],
+    vehicleLoans: [],
+    policies: [],
+    bureauQueries: [],
   };
 }
 
@@ -135,6 +143,14 @@ function load(): DbShape {
     data.disputes = data.disputes ?? [];
     data.whatsappOutbox = data.whatsappOutbox ?? [];
     data.fraudAlerts = data.fraudAlerts ?? [];
+    data.driving = data.driving ?? {};
+    data.credit = data.credit ?? {};
+    data.fuelCards = data.fuelCards ?? {};
+    data.emis = data.emis ?? [];
+    data.advances = data.advances ?? [];
+    data.vehicleLoans = data.vehicleLoans ?? [];
+    data.policies = data.policies ?? [];
+    data.bureauQueries = data.bureauQueries ?? [];
     return data;
   } catch {
     // Missing or corrupted file → start from seed. Corruption is not
