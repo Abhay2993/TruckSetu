@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Server build output & runtime data
+server/dist/
+server/data.json
+server/data.json.tmp
+
 # Expo
 .expo/
 dist/

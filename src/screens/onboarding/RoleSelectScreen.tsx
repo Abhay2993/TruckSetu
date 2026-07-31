@@ -7,12 +7,15 @@
  * so returning users land straight in their interface.
  */
 
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DynamicHeader } from '../../components/DynamicHeader';
+import { IndianTruck } from '../../components/IndianTruck';
 import { SUPPORTED_LOCALES, useTranslation } from '../../i18n/i18n';
+import { api } from '../../services/api';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { UserRole } from '../../types';
@@ -23,9 +26,17 @@ export function RoleSelectScreen(): React.JSX.Element {
   const setLocale = useAppStore((s) => s.setLocale);
   const setRole = useAppStore((s) => s.setRole);
 
+  const chooseRole = (role: UserRole) => {
+    setRole(role);
+    // Persist the choice server-side so the next login skips this screen;
+    // fire-and-forget — a failure only means re-asking next time.
+    void api.updateProfile({ role }).catch(() => {});
+  };
+
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.flex}>
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.brand}>
           <DynamicHeader size="display" prefixColor={colors.textInverse} />
           <Text style={styles.tagline}>{t('appTagline')}</Text>
@@ -57,18 +68,19 @@ export function RoleSelectScreen(): React.JSX.Element {
           role="driver"
           title={t('roleDriver')}
           description={t('roleDriverDesc')}
-          icon={<MaterialCommunityIcons name="truck-fast" size={34} color={colors.accent} />}
-          onSelect={setRole}
+          icon={<IndianTruck width={62} shadow={false} />}
+          onSelect={chooseRole}
         />
         <RoleCard
           role="dealer"
           title={t('roleDealer')}
           description={t('roleDealerDesc')}
           icon={<Ionicons name="briefcase" size={30} color={colors.accent} />}
-          onSelect={setRole}
+          onSelect={chooseRole}
         />
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
@@ -103,9 +115,11 @@ function RoleCard({
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   safe: {
     flex: 1,
-    backgroundColor: colors.primary,
   },
   content: {
     flexGrow: 1,
@@ -171,7 +185,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.99 }],
   },
   roleIcon: {
-    width: 56,
+    width: 72,
     height: 56,
     borderRadius: radii.md,
     backgroundColor: colors.accentSoft,

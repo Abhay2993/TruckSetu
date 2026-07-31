@@ -21,6 +21,8 @@ export interface GpsSimulator {
   routeProgress: number;
   /** Last emitted speed in km/h. */
   currentSpeed: number;
+  /** Last emitted fix — drives the native map's truck marker. */
+  lastPoint: TelemetryPoint | null;
 }
 
 export function useGpsSimulator(
@@ -29,6 +31,7 @@ export function useGpsSimulator(
 ): GpsSimulator {
   const [routeProgress, setRouteProgress] = useState(0.18);
   const [currentSpeed, setCurrentSpeed] = useState(52);
+  const [lastPoint, setLastPoint] = useState<TelemetryPoint | null>(null);
   const progressRef = useRef(routeProgress);
   // Ref indirection keeps the interval stable even if the caller passes a
   // new callback identity every render.
@@ -59,10 +62,11 @@ export function useGpsSimulator(
       onPointRef.current(point);
       setRouteProgress(progressRef.current);
       setCurrentSpeed(speed);
+      setLastPoint(point);
     }, TICK_MS);
 
     return () => clearInterval(id);
   }, [active]);
 
-  return { routeProgress, currentSpeed };
+  return { routeProgress, currentSpeed, lastPoint };
 }

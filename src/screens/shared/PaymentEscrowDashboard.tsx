@@ -16,10 +16,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -28,13 +27,24 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Celebration } from '../../components/Celebration';
+import { ChatSheet } from '../../components/ChatSheet';
+import { ContractCard } from '../../components/ContractCard';
+import { DetentionCard } from '../../components/DetentionCard';
+import { IndianTruck } from '../../components/IndianTruck';
+import { TruckProgress } from '../../components/TruckProgress';
+import { DisputePanel } from '../../components/DisputePanel';
 import { EscrowFlowIndicator } from '../../components/EscrowFlowIndicator';
+import { RatingStars } from '../../components/RatingStars';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
-import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
+import { readConsignmentNo } from '../../services/ocr';
+import { verifyChainLocally } from '../../services/tripRecord';
+import { instantPayoutQuote, splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { useAppStore } from '../../stores/useAppStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { EscrowShipment, ProofOfDelivery } from '../../types';
+import { notify } from '../../utils/dialog';
 import { formatINR, formatTime } from '../../utils/format';
 
 const STAGE_LABEL: Record<EscrowShipment['stage'], string> = {
@@ -53,45 +63,69 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
   const confirmDispatch = useEscrowStore((s) => s.confirmDispatch);
   const attachPod = useEscrowStore((s) => s.attachPod);
   const releaseBalance = useEscrowStore((s) => s.releaseBalance);
+  const rateShipment = useEscrowStore((s) => s.rateShipment);
+  const instantPayout = useEscrowStore((s) => s.instantPayout);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const shipment = useMemo(
     () => shipments.find((s) => s.id === selectedId) ?? shipments[0],
     [shipments, selectedId],
   );
 
+  // Confetti when the selected shipment fully settles. Keyed by shipment id
+  // so switching between shipments in the picker never fires a false burst.
+  const [burst, setBurst] = useState(0);
+  const prevRef = useRef<{ id: string; stage: string } | null>(null);
+  useEffect(() => {
+    if (shipment) {
+      const prev = prevRef.current;
+      if (
+        prev &&
+        prev.id === shipment.id &&
+        prev.stage !== 'BALANCE_RELEASED' &&
+        shipment.stage === 'BALANCE_RELEASED'
+      ) {
+        setBurst((b) => b + 1);
+      }
+      prevRef.current = { id: shipment.id, stage: shipment.stage };
+    }
+  }, [shipment]);
+
   // ---- POD capture (driver) ----------------------------------------------
-  // Both pickers funnel into one attach path; every failure surfaces as an
-  // Alert instead of a silent no-op, because a driver standing at a delivery
-  // gate needs to know whether the POD actually attached.
-  const attach = (shipmentId: string, pod: ProofOfDelivery) => {
-    attachPod(shipmentId, pod);
-    Alert.alert('POD attached', 'The dealer can now release your balance payment.');
+  // Both pickers funnel into one attach path. Before attaching, OCR reads the
+  // consignment number off the POD (Feature 12) so the store/server can flag
+  // a mismatch before the dealer releases the balance.
+  const attach = async (shipmentId: string, pod: ProofOfDelivery, expected?: string) => {
+    const ocr = await readConsignmentNo(pod.uri, expected);
+    // Optimistic: the store transitions locally first, computes verified, and
+    // mirrors to the server in the background (see useEscrowStore.attachPod).
+    void attachPod(shipmentId, { ...pod, ocrConsignmentNo: ocr.consignmentNo });
+    notify('POD attached', 'The dealer can now review and release your balance.');
   };
 
-  const capturePodPhoto = async (shipmentId: string) => {
+  const capturePodPhoto = async (shipmentId: string, expected?: string) => {
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Camera permission needed', 'Allow camera access to photograph the POD.');
+        notify('Camera permission needed', 'Allow camera access to photograph the POD.');
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ quality: 0.7 });
       const asset = result.assets?.[0];
       if (result.canceled || !asset) return;
-      attach(shipmentId, {
-        uri: asset.uri,
-        kind: 'photo',
-        fileName: asset.fileName ?? `pod-${Date.now()}.jpg`,
-        uploadedAt: Date.now(),
-      });
+      await attach(
+        shipmentId,
+        { uri: asset.uri, kind: 'photo', fileName: asset.fileName ?? `pod-${Date.now()}.jpg`, uploadedAt: Date.now() },
+        expected,
+      );
     } catch (error) {
       console.warn('[pod] camera capture failed', error);
-      Alert.alert('Could not open camera', 'Please try again or attach a file instead.');
+      notify('Could not open camera', 'Please try again or attach a file instead.');
     }
   };
 
-  const pickPodDocument = async (shipmentId: string) => {
+  const pickPodDocument = async (shipmentId: string, expected?: string) => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf'],
@@ -99,15 +133,14 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       });
       const asset = result.assets?.[0];
       if (result.canceled || !asset) return;
-      attach(shipmentId, {
-        uri: asset.uri,
-        kind: 'document',
-        fileName: asset.name ?? `pod-${Date.now()}.pdf`,
-        uploadedAt: Date.now(),
-      });
+      await attach(
+        shipmentId,
+        { uri: asset.uri, kind: 'document', fileName: asset.name ?? `pod-${Date.now()}.pdf`, uploadedAt: Date.now() },
+        expected,
+      );
     } catch (error) {
       console.warn('[pod] document pick failed', error);
-      Alert.alert('Could not open files', 'Please try again or use the camera instead.');
+      notify('Could not open files', 'Please try again or use the camera instead.');
     }
   };
 
@@ -117,7 +150,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScreenHeader />
         <View style={styles.empty}>
-          <Ionicons name="wallet-outline" size={40} color={colors.textMuted} />
+          <IndianTruck width={190} />
           <Text style={styles.emptyText}>No shipments yet. Book a load to start an escrow.</Text>
         </View>
       </SafeAreaView>
@@ -126,10 +159,14 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
 
   const { advanceInr, balanceInr } = splitAmounts(shipment);
   const isProcessing = processingIds.includes(shipment.id);
+  // Recompute the chain on every render — cheap, and it means the badge
+  // reflects the events actually on screen rather than a cached verdict.
+  const ledger = verifyChainLocally(shipment);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScreenHeader />
+      <Celebration burst={burst} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Shipment picker */}
         {shipments.length > 1 && (
@@ -139,6 +176,7 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
               return (
                 <Pressable
                   key={s.id}
+                  accessibilityRole="button"
                   onPress={() => setSelectedId(s.id)}
                   style={[styles.pickerChip, selected && styles.pickerChipSelected]}
                 >
@@ -171,8 +209,10 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
             <Text style={styles.subline}>
               Advance {shipment.advancePercent}% ({formatINR(advanceInr)}) · Balance{' '}
               {formatINR(balanceInr)}
+              {shipment.insured ? ' · 🛡 Insured' : ''}
             </Text>
           </View>
+          <TruckProgress shipment={shipment} />
         </View>
 
         {/* Stage 1 → escrow → release pipeline */}
@@ -209,14 +249,32 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           )}
 
           {role === 'dealer' && shipment.stage === 'POD_UPLOADED' && (
-            <ActionButton
-              label={t('releaseBalance')}
-              caption={`Releases ${formatINR(balanceInr)} from escrow to the driver`}
-              icon="lock-open"
-              tone="success"
-              busy={isProcessing}
-              onPress={() => void releaseBalance(shipment.id)}
-            />
+            <>
+              {/* Feature 12: OCR verdict the dealer reviews before releasing. */}
+              {shipment.pod && shipment.consignmentNo && (
+                <StatusNote
+                  icon={shipment.pod.verified ? 'shield-checkmark' : 'warning'}
+                  tone={shipment.pod.verified ? 'success' : 'neutral'}
+                  text={
+                    shipment.pod.verified
+                      ? `POD verified — consignment ${shipment.consignmentNo} matches.`
+                      : `POD consignment mismatch: read ${shipment.pod.ocrConsignmentNo ?? 'none'}, expected ${shipment.consignmentNo}. Review before releasing.`
+                  }
+                />
+              )}
+              {shipment.disputeId ? (
+                <StatusNote icon="lock-closed" text="Escrow is frozen by an open dispute — resolve it below to release." />
+              ) : (
+                <ActionButton
+                  label={t('releaseBalance')}
+                  caption={`Releases ${formatINR(balanceInr)} from escrow to the driver`}
+                  icon="lock-open"
+                  tone="success"
+                  busy={isProcessing}
+                  onPress={() => void releaseBalance(shipment.id)}
+                />
+              )}
+            </>
           )}
 
           {role === 'driver' && shipment.stage === 'CREATED' && (
@@ -237,34 +295,65 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
               <Text style={styles.podHint}>
                 Delivered? {t('uploadPod')} to unlock your {formatINR(balanceInr)} balance:
               </Text>
+              {shipment.consignmentNo && (
+                <Text style={styles.podHint}>
+                  Consignment on this load: {shipment.consignmentNo} — we'll read it off your POD.
+                </Text>
+              )}
               <View style={styles.podButtonRow}>
                 <ActionButton
                   label="Camera"
                   icon="camera"
                   compact
-                  onPress={() => void capturePodPhoto(shipment.id)}
+                  onPress={() => void capturePodPhoto(shipment.id, shipment.consignmentNo)}
                 />
                 <ActionButton
                   label="Attach file"
                   icon="document-attach"
                   compact
                   tone="neutral"
-                  onPress={() => void pickPodDocument(shipment.id)}
+                  onPress={() => void pickPodDocument(shipment.id, shipment.consignmentNo)}
                 />
               </View>
             </View>
           )}
 
           {shipment.stage === 'POD_UPLOADED' && role === 'driver' && (
-            <StatusNote icon="shield-checkmark" text="POD uploaded — dealer is verifying. Balance releases from escrow next." />
+            <>
+              <StatusNote icon="shield-checkmark" text="POD uploaded — dealer is verifying. Balance releases from escrow next." />
+              {/* Instant payout (factoring): don't wait for the dealer. */}
+              {!shipment.disputeId && (() => {
+                const quote = instantPayoutQuote(shipment);
+                return (
+                  <ActionButton
+                    label={`Get ${formatINR(quote.netInr)} now`}
+                    caption={`Instant payout · fee ${formatINR(quote.feeInr)} (1.5%) instead of waiting`}
+                    icon="flash"
+                    tone="success"
+                    busy={isProcessing}
+                    onPress={() => void instantPayout(shipment.id)}
+                  />
+                );
+              })()}
+            </>
           )}
 
           {shipment.stage === 'BALANCE_RELEASED' && (
-            <StatusNote
-              icon="checkmark-done-circle"
-              tone="success"
-              text={`Fully settled — ${formatINR(shipment.totalAmountInr)} paid.`}
-            />
+            <>
+              <StatusNote
+                icon="checkmark-done-circle"
+                tone="success"
+                text={`Fully settled — ${formatINR(shipment.totalAmountInr)} paid.`}
+              />
+              {/* Two-way trust: each side rates the other after settlement. */}
+              <RatingStars
+                label={role === 'dealer' ? `Rate ${shipment.driverName}` : 'Rate the dealer'}
+                value={role === 'dealer' ? shipment.ratingByDealer : shipment.ratingByDriver}
+                onRate={(stars) =>
+                  void rateShipment(shipment.id, stars, role === 'dealer' ? 'dealer' : 'driver')
+                }
+              />
+            </>
           )}
         </View>
 
@@ -285,14 +374,75 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
                   {shipment.pod.fileName}
                 </Text>
                 <Text style={styles.subline}>Uploaded at {formatTime(shipment.pod.uploadedAt)}</Text>
+                {shipment.consignmentNo && (
+                  <View style={styles.podVerifyRow}>
+                    <Ionicons
+                      name={shipment.pod.verified ? 'shield-checkmark' : 'warning'}
+                      size={13}
+                      color={shipment.pod.verified ? colors.success : colors.warning}
+                    />
+                    <Text
+                      style={[
+                        styles.podVerifyText,
+                        { color: shipment.pod.verified ? colors.success : colors.warning },
+                      ]}
+                    >
+                      {shipment.pod.verified
+                        ? `Consignment ${shipment.pod.ocrConsignmentNo} verified`
+                        : `OCR read ${shipment.pod.ocrConsignmentNo ?? 'none'} · expected ${shipment.consignmentNo}`}
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
         )}
 
-        {/* Audit timeline */}
+        {/* Chat + dispute (Features 10 & 13) — available once a trip exists */}
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Timeline</Text>
+          <Text style={styles.sectionTitle}>Coordination</Text>
+          <ActionButton
+            label={role === 'dealer' ? `Chat with ${shipment.driverName}` : 'Chat with the dealer'}
+            icon="chatbubbles"
+            tone="neutral"
+            onPress={() => setChatOpen(true)}
+          />
+          <ContractCard shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
+          <DetentionCard shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
+          <DisputePanel shipment={shipment} role={role === 'dealer' ? 'dealer' : 'driver'} />
+        </View>
+
+        {/* Audit timeline — hash-chained, so tampering is detectable */}
+        <View style={styles.card}>
+          <View style={styles.ledgerHead}>
+            <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Timeline</Text>
+            <View
+              style={[
+                styles.ledgerChip,
+                { backgroundColor: ledger.intact ? colors.successSoft : colors.dangerSoft },
+              ]}
+            >
+              <Ionicons
+                name={ledger.intact ? 'lock-closed' : 'warning'}
+                size={11}
+                color={ledger.intact ? colors.success : colors.danger}
+              />
+              <Text
+                style={[
+                  styles.ledgerChipText,
+                  { color: ledger.intact ? colors.success : colors.danger },
+                ]}
+              >
+                {ledger.intact ? 'VERIFIED' : 'ALTERED'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.ledgerDetail}>{ledger.detail}</Text>
+          {ledger.headHash && (
+            <Text style={styles.ledgerHash} numberOfLines={1}>
+              head: {ledger.headHash.slice(0, 24)}…
+            </Text>
+          )}
           {[...shipment.events].reverse().map((e, i) => (
             <View key={`${e.at}-${i}`} style={styles.eventRow}>
               <View style={styles.eventDot} />
@@ -302,6 +452,14 @@ export function PaymentEscrowDashboard(): React.JSX.Element {
           ))}
         </View>
       </ScrollView>
+
+      <ChatSheet
+        visible={chatOpen}
+        shipmentId={shipment.id}
+        role={role === 'dealer' ? 'dealer' : 'driver'}
+        counterpartLabel={role === 'dealer' ? shipment.driverName : 'Dealer'}
+        onClose={() => setChatOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -531,6 +689,45 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.sm,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  podVerifyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  podVerifyText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '700',
+    flex: 1,
+  },
+  ledgerHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ledgerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  ledgerChipText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  ledgerDetail: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  ledgerHash: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontFamily: 'monospace' as never,
+    marginBottom: spacing.sm,
   },
   eventRow: {
     flexDirection: 'row',

@@ -15,30 +15,45 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { PhoneLoginScreen } from '../screens/auth/PhoneLoginScreen';
+import { DealerLedgerScreen } from '../screens/dealer/DealerLedgerScreen';
 import { DealerLoadsScreen } from '../screens/dealer/DealerLoadsScreen';
 import { DealerShipmentsScreen } from '../screens/dealer/DealerShipmentsScreen';
+import { DocumentsScreen } from '../screens/driver/DocumentsScreen';
+import { DriverLoadsScreen } from '../screens/driver/DriverLoadsScreen';
 import { DriverRouteScreen } from '../screens/driver/DriverRouteScreen';
 import { DriverTripsScreen } from '../screens/driver/DriverTripsScreen';
 import { RoleSelectScreen } from '../screens/onboarding/RoleSelectScreen';
+import { MoneyScreen } from '../screens/shared/MoneyScreen';
 import { PaymentEscrowDashboard } from '../screens/shared/PaymentEscrowDashboard';
+import { registerForPush } from '../services/push';
+import { connectRealtime, disconnectRealtime } from '../services/realtime';
+import { syncFromServer } from '../services/sync';
 import { useAppStore } from '../stores/useAppStore';
+import { useAuthStore } from '../stores/useAuthStore';
 import { colors } from '../theme';
 
 export type DriverTabParamList = {
   Route: undefined;
+  Loads: undefined;
   Trips: undefined;
+  Money: undefined;
+  Docs: undefined;
   Payments: undefined;
 };
 
 export type DealerTabParamList = {
   Loads: undefined;
-  Shipments: undefined;
+  Fleet: undefined;
+  Ledger: undefined;
+  Money: undefined;
   Payments: undefined;
 };
 
 export type OnboardingStackParamList = {
+  PhoneLogin: undefined;
   RoleSelect: undefined;
 };
 
@@ -50,8 +65,17 @@ const tabScreenOptions = {
   headerShown: false,
   tabBarActiveTintColor: colors.accent,
   tabBarInactiveTintColor: colors.textMuted,
-  tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
-  tabBarLabelStyle: { fontWeight: '700' as const },
+  tabBarStyle: {
+    backgroundColor: colors.surface,
+    borderTopWidth: 0,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 14,
+  },
+  // 10px keeps six labels un-truncated at 390pt (the narrowest phone we target).
+  tabBarLabelStyle: { fontWeight: '700' as const, fontSize: 10 },
 };
 
 function DriverTabs(): React.JSX.Element {
@@ -65,6 +89,15 @@ function DriverTabs(): React.JSX.Element {
         }}
       />
       <DriverTab.Screen
+        name="Loads"
+        component={DriverLoadsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="package-variant" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
         name="Trips"
         component={DriverTripsScreen}
         options={{
@@ -74,9 +107,30 @@ function DriverTabs(): React.JSX.Element {
         }}
       />
       <DriverTab.Screen
+        name="Money"
+        component={MoneyScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bank" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
+        name="Docs"
+        component={DocumentsScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="folder-open" size={size} color={color} />
+          ),
+        }}
+      />
+      <DriverTab.Screen
         name="Payments"
         component={PaymentEscrowDashboard}
         options={{
+          // "Escrow" over "Payments": it fits the six-tab bar without
+          // truncating, and reads unambiguously next to the Money tab.
+          tabBarLabel: 'Escrow',
           tabBarIcon: ({ color, size }) => <Ionicons name="wallet" size={size} color={color} />,
         }}
       />
@@ -95,11 +149,29 @@ function DealerTabs(): React.JSX.Element {
         }}
       />
       <DealerTab.Screen
-        name="Shipments"
+        name="Fleet"
         component={DealerShipmentsScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="map-marker-path" size={size} color={color} />
+          ),
+        }}
+      />
+      <DealerTab.Screen
+        name="Ledger"
+        component={DealerLedgerScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="notebook-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <DealerTab.Screen
+        name="Money"
+        component={MoneyScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="bank" size={size} color={color} />
           ),
         }}
       />
@@ -116,11 +188,24 @@ function DealerTabs(): React.JSX.Element {
 
 export function RootNavigator(): React.JSX.Element {
   const role = useAppStore((s) => s.role);
-  const hasHydrated = useAppStore((s) => s.hasHydrated);
+  const appHydrated = useAppStore((s) => s.hasHydrated);
+  const token = useAuthStore((s) => s.token);
+  const authHydrated = useAuthStore((s) => s.hasHydrated);
 
-  // Hold rendering until AsyncStorage rehydrates, otherwise a returning
-  // driver would flash the onboarding screen on every cold start.
-  if (!hasHydrated) {
+  // On a warm start with a stored session, refresh loads/shipments/wallet
+  // from the server and open the SSE stream (both no-ops in demo mode).
+  useEffect(() => {
+    if (authHydrated && token) {
+      void syncFromServer();
+      void registerForPush();
+      connectRealtime(token);
+    }
+    return () => disconnectRealtime();
+  }, [authHydrated, token]);
+
+  // Hold rendering until both persisted stores rehydrate, otherwise a
+  // returning user would flash the login screen on every cold start.
+  if (!appHydrated || !authHydrated) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.accent} />
@@ -128,6 +213,16 @@ export function RootNavigator(): React.JSX.Element {
     );
   }
 
+  // Gate 1: authentication.
+  if (!token) {
+    return (
+      <OnboardingStack.Navigator screenOptions={{ headerShown: false }}>
+        <OnboardingStack.Screen name="PhoneLogin" component={PhoneLoginScreen} />
+      </OnboardingStack.Navigator>
+    );
+  }
+
+  // Gate 2: role selection (Feature B).
   if (role === 'driver') return <DriverTabs />;
   if (role === 'dealer') return <DealerTabs />;
 

@@ -4,16 +4,17 @@
  * (see useLoadsStore.acceptBid), after which it shows up on the Payments tab.
  */
 
-import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -21,9 +22,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
+import { consolidationGroups } from '../../services/marketplace';
 import { useLoadsStore } from '../../stores/useLoadsStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { Load } from '../../types';
+import { confirmAction, notify } from '../../utils/dialog';
 import { formatINR, timeAgo } from '../../utils/format';
 
 export function DealerLoadsScreen(): React.JSX.Element {
@@ -32,15 +35,37 @@ export function DealerLoadsScreen(): React.JSX.Element {
   const acceptBid = useLoadsStore((s) => s.acceptBid);
   const [showPostModal, setShowPostModal] = useState(false);
 
-  const handleAccept = (load: Load, bidId: string, driverName: string) => {
-    Alert.alert(
+  // Part-loads on the same lane that would fit in one truck. Pure function
+  // of the board, so demo and server mode agree without a round trip.
+  const consolidation = useMemo(() => consolidationGroups(loads), [loads]);
+
+  // WhatsApp broadcast — dealers share loads to driver groups all day; this
+  // pre-fills the message and opens WhatsApp (wa.me works on web too).
+  const shareOnWhatsApp = async (load: Load) => {
+    const text = encodeURIComponent(
+      `🚛 Load available: ${load.origin} → ${load.destination}\n${load.material} · ${load.weightTonnes}T · ₹${load.priceInr} (${load.advancePercent}% advance)\nBid on TruckSetu!`,
+    );
+    const appUrl = `whatsapp://send?text=${text}`;
+    const webUrl = `https://wa.me/?text=${text}`;
+    try {
+      await Linking.openURL(Platform.OS === 'web' ? webUrl : appUrl);
+    } catch {
+      await Linking.openURL(webUrl).catch(() => notify('WhatsApp not found', 'Install WhatsApp to share loads.'));
+    }
+  };
+
+  const handleAccept = async (load: Load, bidId: string, driverName: string) => {
+    const ok = await confirmAction(
       'Accept bid?',
       `Book ${driverName} for ${load.origin} → ${load.destination}? An escrow shipment will be created.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Accept', style: 'default', onPress: () => acceptBid(load.id, bidId) },
-      ],
+      'Accept',
     );
+    if (!ok) return;
+    try {
+      await acceptBid(load.id, bidId);
+    } catch (e) {
+      notify('Could not accept bid', e instanceof Error ? e.message : 'Please try again.');
+    }
   };
 
   return (
@@ -55,6 +80,27 @@ export function DealerLoadsScreen(): React.JSX.Element {
           <Ionicons name="add-circle" size={20} color={colors.textInverse} />
           <Text style={styles.postButtonText}>{t('bookLoad')}</Text>
         </Pressable>
+
+        {/* Part-load consolidation — only possible with density on a lane */}
+        {consolidation.map((group) => (
+          <View key={group.lane + group.loadIds.join()} style={styles.poolCard}>
+            <View style={styles.poolHead}>
+              <MaterialCommunityIcons name="package-variant-closed" size={17} color={colors.success} />
+              <Text style={styles.poolTitle}>Pool {group.loadIds.length} part-loads</Text>
+              <Text style={styles.poolFill}>{group.fillPercent}% full</Text>
+            </View>
+            <Text style={styles.poolLane}>
+              {group.lane} · {group.totalTonnes} T in one truck
+            </Text>
+            <View style={styles.poolBarTrack}>
+              <View style={[styles.poolBarFill, { width: `${group.fillPercent}%` }]} />
+            </View>
+            <Text style={styles.poolSaving}>
+              {formatINR(group.separateTotalInr)} separately → {formatINR(group.pooledTotalInr)}{' '}
+              pooled · each shipper saves {formatINR(group.savingPerShipperInr)}
+            </Text>
+          </View>
+        ))}
 
         {loads.map((load) => (
           <View key={load.id} style={styles.loadCard}>
@@ -81,7 +127,18 @@ export function DealerLoadsScreen(): React.JSX.Element {
             <Text style={styles.loadMeta}>
               {load.material} · {load.weightTonnes} T · {formatINR(load.priceInr)} ·{' '}
               {load.advancePercent}% advance · {timeAgo(load.postedAt)}
+              {load.insured ? ' · 🛡 insured' : ''}
             </Text>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Share on WhatsApp"
+              onPress={() => void shareOnWhatsApp(load)}
+              style={({ pressed }) => [styles.waShareBtn, pressed && { opacity: 0.8 }]}
+            >
+              <Ionicons name="logo-whatsapp" size={14} color="#25D366" />
+              <Text style={styles.waShareText}>Share on WhatsApp</Text>
+            </Pressable>
 
             {load.status === 'open' && load.bids.length > 0 && (
               <View style={styles.bidsBlock}>
@@ -91,15 +148,23 @@ export function DealerLoadsScreen(): React.JSX.Element {
                 {load.bids.map((bid) => (
                   <View key={bid.id} style={styles.bidRow}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.bidDriver}>
-                        {bid.driverName} · ★ {bid.rating.toFixed(1)}
-                      </Text>
+                      <View style={styles.bidNameRow}>
+                        <Text style={styles.bidDriver}>
+                          {bid.driverName} · ★ {bid.rating.toFixed(1)}
+                        </Text>
+                        {bid.kycVerified && (
+                          <View style={styles.kycBadge}>
+                            <Ionicons name="shield-checkmark" size={10} color={colors.success} />
+                            <Text style={styles.kycBadgeText}>KYC</Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={styles.bidMeta}>{bid.truckNumber}</Text>
                     </View>
                     <Text style={styles.bidAmount}>{formatINR(bid.amountInr)}</Text>
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() => handleAccept(load, bid.id, bid.driverName)}
+                      onPress={() => void handleAccept(load, bid.id, bid.driverName)}
                       style={({ pressed }) => [styles.acceptBtn, pressed && { opacity: 0.8 }]}
                     >
                       <Text style={styles.acceptBtnText}>Accept</Text>
@@ -134,31 +199,45 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
   const [material, setMaterial] = useState('');
   const [weight, setWeight] = useState('');
   const [price, setPrice] = useState('');
+  const [insured, setInsured] = useState(false);
 
-  const submit = () => {
+  // Live premium preview: 0.35% of freight, minimum ₹99.
+  const priceNum = Number(price);
+  const premiumInr =
+    Number.isFinite(priceNum) && priceNum > 0 ? Math.max(99, Math.round(priceNum * 0.0035)) : 99;
+
+  const submit = async () => {
     const weightTonnes = Number(weight);
     const priceInr = Number(price);
     if (!origin.trim() || !destination.trim() || !material.trim()) {
-      Alert.alert('Missing details', 'Origin, destination and material are required.');
+      notify('Missing details', 'Origin, destination and material are required.');
       return;
     }
     if (!Number.isFinite(weightTonnes) || weightTonnes <= 0 || !Number.isFinite(priceInr) || priceInr <= 0) {
-      Alert.alert('Invalid numbers', 'Weight and freight amount must be positive numbers.');
+      notify('Invalid numbers', 'Weight and freight amount must be positive numbers.');
       return;
     }
-    postLoad({
-      origin: origin.trim(),
-      destination: destination.trim(),
-      material: material.trim(),
-      weightTonnes,
-      priceInr,
-      advancePercent: 70,
-    });
+    try {
+      await postLoad({
+        origin: origin.trim(),
+        destination: destination.trim(),
+        material: material.trim(),
+        weightTonnes,
+        priceInr,
+        advancePercent: 70,
+        insured,
+      });
+    } catch (e) {
+      // Server mode: the backend rejected the load — keep the sheet open.
+      notify('Could not post load', e instanceof Error ? e.message : 'Please try again.');
+      return;
+    }
     setOrigin('');
     setDestination('');
     setMaterial('');
     setWeight('');
     setPrice('');
+    setInsured(false);
     onClose();
   };
 
@@ -216,9 +295,24 @@ function PostLoadModal({ visible, onClose }: { visible: boolean; onClose: () => 
             />
           </View>
 
+          {/* Per-shipment goods-in-transit insurance */}
+          <View style={styles.insureRow}>
+            <Ionicons name="shield-checkmark" size={18} color={insured ? colors.success : colors.textMuted} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.insureTitle}>Insure this load · {formatINR(premiumInr)}</Text>
+              <Text style={styles.insureSub}>Goods-in-transit cover for the full freight value</Text>
+            </View>
+            <Switch
+              value={insured}
+              onValueChange={setInsured}
+              trackColor={{ true: colors.success, false: colors.border }}
+              thumbColor={colors.surface}
+            />
+          </View>
+
           <Pressable
             accessibilityRole="button"
-            onPress={submit}
+            onPress={() => void submit()}
             style={({ pressed }) => [styles.submitBtn, pressed && { opacity: 0.8 }]}
           >
             <Text style={styles.submitBtnText}>Post load (70% advance)</Text>
@@ -261,6 +355,51 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     ...cardShadow,
   },
+  poolCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colors.success,
+    ...cardShadow,
+  },
+  poolHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  poolTitle: {
+    flex: 1,
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  poolFill: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    color: colors.success,
+  },
+  poolLane: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  poolBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  poolBarFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.success,
+  },
+  poolSaving: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
+  },
   loadTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -302,10 +441,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  bidNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   bidDriver: {
     fontSize: fontSizes.sm,
     fontWeight: '700',
     color: colors.textPrimary,
+  },
+  kycBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: colors.successSoft,
+    borderRadius: radii.pill,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  kycBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.success,
   },
   bidMeta: {
     fontSize: fontSizes.xs,
@@ -331,6 +489,38 @@ const styles = StyleSheet.create({
     fontSize: fontSizes.xs,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  waShareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#25D366',
+    borderRadius: radii.sm,
+    paddingVertical: 7,
+  },
+  waShareText: {
+    color: '#1DA851',
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+  },
+  insureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    backgroundColor: colors.background,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+  },
+  insureTitle: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  insureSub: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   modalBackdrop: {
     flex: 1,

@@ -18,9 +18,33 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import { SEED_SHIPMENT } from '../data/mock';
+import { isServerMode } from '../config';
+import { SEED_SETTLED_SHIPMENT, SEED_SHIPMENT } from '../data/mock';
 import { api } from '../services/api';
-import type { EscrowShipment, EscrowStage, ProofOfDelivery } from '../types';
+import { detentionCharge } from '../services/tripRecord';
+import type {
+  DetentionRecord,
+  EscrowShipment,
+  EscrowStage,
+  NotificationKind,
+  ProofOfDelivery,
+} from '../types';
+import { useNotificationsStore } from './useNotificationsStore';
+
+/**
+ * Emit an in-app notification for an escrow event — demo mode only, because
+ * in server mode the backend already creates the authoritative record (which
+ * refresh() pulls). Avoids double notifications.
+ */
+function localNotify(
+  kind: NotificationKind,
+  title: string,
+  body: string,
+  shipmentId: string,
+): void {
+  if (isServerMode) return;
+  useNotificationsStore.getState().add(kind, title, body, shipmentId);
+}
 
 interface EscrowState {
   shipments: EscrowShipment[];
@@ -28,8 +52,30 @@ interface EscrowState {
   processingIds: string[];
   addShipment: (shipment: EscrowShipment) => void;
   confirmDispatch: (shipmentId: string) => Promise<void>;
-  attachPod: (shipmentId: string, pod: ProofOfDelivery) => void;
+  attachPod: (shipmentId: string, pod: ProofOfDelivery) => Promise<void>;
   releaseBalance: (shipmentId: string) => Promise<void>;
+  /** Two-way rating, legal only after settlement. */
+  rateShipment: (shipmentId: string, stars: number, as: 'dealer' | 'driver') => Promise<void>;
+  /** Instant payout (factoring): cash out the escrowed balance for a fee. */
+  instantPayout: (shipmentId: string) => Promise<void>;
+  /** Generate the e-Way bill (NIC API in production; simulated locally). */
+  generateEwayBill: (shipmentId: string) => Promise<void>;
+  /** Aadhaar eSign the digital LR for one party (dev OTP accepted). */
+  signContract: (shipmentId: string, as: 'dealer' | 'driver', otp: string) => Promise<void>;
+  /** Record a geofence arrival/departure for detention billing. */
+  stampDetention: (
+    shipmentId: string,
+    stop: 'origin' | 'destination',
+    event: 'arrived' | 'departed',
+    at: number,
+  ) => Promise<void>;
+}
+
+/** Factoring fee: 1.5% of the escrowed balance, minimum ₹49. */
+export function instantPayoutQuote(shipment: EscrowShipment): { feeInr: number; netInr: number } {
+  const { balanceInr } = splitAmounts(shipment);
+  const feeInr = Math.max(49, Math.round(balanceInr * 0.015));
+  return { feeInr, netInr: balanceInr - feeInr };
 }
 
 /** Split helper used by both the store and the dashboard UI. */
@@ -58,7 +104,7 @@ function transition(
 export const useEscrowStore = create<EscrowState>()(
   persist(
     (set, get) => ({
-      shipments: [SEED_SHIPMENT],
+      shipments: [SEED_SHIPMENT, SEED_SETTLED_SHIPMENT],
       processingIds: [],
 
       addShipment: (shipment) => set((s) => ({ shipments: [shipment, ...s.shipments] })),
@@ -75,15 +121,24 @@ export const useEscrowStore = create<EscrowState>()(
         const { advanceInr } = splitAmounts(shipment);
         try {
           // Stage 1 fires automatically on dispatch — no extra user action.
-          const { referenceId } = await api.triggerAdvancePayout(shipmentId, advanceInr);
+          // Server mode returns the authoritative shipment; demo mode
+          // returns null and the equivalent transition is applied locally.
+          const remote = await api.dispatchShipment(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) => (sh.id === shipmentId ? remote : sh)),
+            }));
+            return;
+          }
           set((s) => ({
             shipments: transition(
               s.shipments,
               shipmentId,
               'ADVANCE_PAID',
-              `Advance paid to fuel card (ref ${referenceId})`,
+              `Advance paid to fuel card (ref ADV-${shipmentId}-${advanceInr})`,
             ),
           }));
+          localNotify('advance_paid', 'Advance paid to fuel card', `₹${advanceInr} released`, shipmentId);
         } catch {
           // Payout failed — roll back so the dealer can retry dispatch.
           set((s) => ({
@@ -105,39 +160,259 @@ export const useEscrowStore = create<EscrowState>()(
         }
       },
 
-      attachPod: (shipmentId, pod) => {
+      attachPod: async (shipmentId, pod) => {
         const shipment = get().shipments.find((s) => s.id === shipmentId);
         if (!shipment || shipment.stage !== 'ADVANCE_PAID') return;
+        // OCR verification (Feature 12): compare the number read off the POD
+        // to what the load promised. Server recomputes authoritatively; this
+        // gives demo mode the same verified/mismatch signal.
+        const verified = Boolean(
+          shipment.consignmentNo && pod.ocrConsignmentNo && pod.ocrConsignmentNo === shipment.consignmentNo,
+        );
+        const verifiedPod = { ...pod, verified };
+        const label = verified
+          ? `POD uploaded & verified (consignment ${pod.ocrConsignmentNo})`
+          : shipment.consignmentNo
+            ? `POD uploaded — consignment mismatch (read ${pod.ocrConsignmentNo ?? 'none'}, expected ${shipment.consignmentNo})`
+            : `POD uploaded (${pod.fileName})`;
+        // Optimistic local transition — the POD file lives on-device, so the
+        // driver's copy is correct regardless of connectivity.
         set((s) => ({
-          shipments: transition(
-            s.shipments,
-            shipmentId,
-            'POD_UPLOADED',
-            `POD uploaded (${pod.fileName})`,
-            { pod },
-          ),
+          shipments: transition(s.shipments, shipmentId, 'POD_UPLOADED', label, { pod: verifiedPod }),
         }));
+        localNotify(
+          'pod_uploaded',
+          verified ? 'POD uploaded & verified' : 'POD uploaded — needs review',
+          verified ? 'Consignment matches' : 'Check the consignment number',
+          shipmentId,
+        );
+        try {
+          const remote = await api.uploadPod(shipmentId, pod);
+          if (remote) {
+            // Server copy is authoritative but must not clobber the local
+            // file uri (the server only stores metadata).
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+          }
+        } catch (error) {
+          // Local state stands; the next releaseBalance surfaces any
+          // server-side stage mismatch as a retryable failure event.
+          console.warn('[escrow] POD server sync failed', error);
+        }
       },
 
       releaseBalance: async (shipmentId) => {
         const shipment = get().shipments.find((s) => s.id === shipmentId);
         // The guard that makes this "escrow": no POD, no release.
         if (!shipment || shipment.stage !== 'POD_UPLOADED') return;
+        // Feature 13: an open dispute freezes the money (server enforces the
+        // same; this keeps the demo honest and avoids a doomed request).
+        if (shipment.disputeId) return;
 
         set((s) => ({ processingIds: [...s.processingIds, shipmentId] }));
         const { balanceInr } = splitAmounts(shipment);
         try {
-          const { referenceId } = await api.releaseEscrowBalance(shipmentId, balanceInr);
+          const remote = await api.releaseShipmentBalance(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+            return;
+          }
           set((s) => ({
             shipments: transition(
               s.shipments,
               shipmentId,
               'BALANCE_RELEASED',
-              `Balance released from escrow (ref ${referenceId})`,
+              `Balance released from escrow (ref BAL-${shipmentId}-${balanceInr})`,
+            ),
+          }));
+          localNotify('balance_released', 'Balance released!', `₹${balanceInr} paid — trip settled`, shipmentId);
+        } catch {
+          // Payment API failed — stay in POD_UPLOADED so the dealer can
+          // retry, and record the attempt in the audit trail. Without this
+          // catch the rejection would escape as an unhandled promise
+          // rejection (screens call this fire-and-forget).
+          set((s) => ({
+            shipments: transition(
+              s.shipments,
+              shipmentId,
+              'POD_UPLOADED',
+              'Balance release failed — tap Release Balance to retry',
             ),
           }));
         } finally {
           set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
+        }
+      },
+
+      instantPayout: async (shipmentId) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        // Same guards as release: POD in, no open dispute.
+        if (!shipment || shipment.stage !== 'POD_UPLOADED' || shipment.disputeId) return;
+
+        set((s) => ({ processingIds: [...s.processingIds, shipmentId] }));
+        const { feeInr, netInr } = instantPayoutQuote(shipment);
+        try {
+          const remote = await api.instantPayout(shipmentId);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote.shipment, pod: sh.pod ?? remote.shipment.pod } : sh,
+              ),
+            }));
+          } else {
+            set((s) => ({
+              shipments: transition(
+                s.shipments,
+                shipmentId,
+                'BALANCE_RELEASED',
+                `Instant payout: ${netInr} paid now (fee ${feeInr} @ 1.5%)`,
+                { instantPayoutFeeInr: feeInr },
+              ),
+            }));
+          }
+          localNotify('balance_released', 'Instant payout done!', `₹${netInr} paid now (fee ₹${feeInr})`, shipmentId);
+        } catch {
+          set((s) => ({
+            shipments: transition(
+              s.shipments,
+              shipmentId,
+              'POD_UPLOADED',
+              'Instant payout failed — try again',
+            ),
+          }));
+        } finally {
+          set((s) => ({ processingIds: s.processingIds.filter((id) => id !== shipmentId) }));
+        }
+      },
+
+      generateEwayBill: async (shipmentId) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment || shipment.ewayBillNumber) return;
+        const remote = await api.generateEwayBill(shipmentId).catch(() => null);
+        if (remote) {
+          set((s) => ({
+            shipments: s.shipments.map((sh) =>
+              sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+            ),
+          }));
+          return;
+        }
+        // Demo mode: simulated 12-digit EBN, same shape as the NIC rule.
+        const ebn = String(1e11 + Math.floor(Math.random() * 9e11)).slice(0, 12);
+        set((s) => ({
+          shipments: transition(s.shipments, shipmentId, shipment.stage, `e-Way bill generated: ${ebn} (simulated)`, {
+            ewayBillNumber: ebn,
+          }),
+        }));
+      },
+
+      signContract: async (shipmentId, as, otp) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment || !/^\d{6}$/.test(otp)) return;
+        const remote = await api.signContract(shipmentId, as, otp).catch(() => null);
+        if (remote) {
+          set((s) => ({
+            shipments: s.shipments.map((sh) =>
+              sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+            ),
+          }));
+          return;
+        }
+        // Demo mode: apply the identical signature transition locally.
+        const field = as === 'dealer' ? 'signedByDealerAt' : 'signedByDriverAt';
+        const contract = shipment.contract ?? {
+          textHash: `demo-${shipmentId}`,
+          signedByDealerAt: null,
+          signedByDriverAt: null,
+        };
+        const next = { ...contract, [field]: contract[field] ?? Date.now() };
+        const fully = next.signedByDealerAt && next.signedByDriverAt;
+        set((s) => ({
+          shipments: transition(
+            s.shipments,
+            shipmentId,
+            shipment.stage,
+            fully ? 'Contract fully signed (digital LR)' : `Contract signed by ${as}`,
+            { contract: next },
+          ),
+        }));
+      },
+
+      stampDetention: async (shipmentId, stop, event, at) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        if (!shipment) return;
+        const remote = await api.stampDetention(shipmentId, stop, event, at).catch(() => null);
+
+        const base: DetentionRecord = shipment.detention ?? {
+          originArrivedAt: null,
+          originDepartedAt: null,
+          destinationArrivedAt: null,
+          destinationDepartedAt: null,
+          loadingHours: null,
+          unloadingHours: null,
+          chargeInr: 0,
+          settled: false,
+        };
+        // Server mode adopts the authoritative record; demo mode recomputes
+        // the identical arithmetic locally.
+        const next: DetentionRecord =
+          remote ??
+          (() => {
+            const key = `${stop}${event === 'arrived' ? 'ArrivedAt' : 'DepartedAt'}` as
+              | 'originArrivedAt'
+              | 'originDepartedAt'
+              | 'destinationArrivedAt'
+              | 'destinationDepartedAt';
+            const draft: DetentionRecord = { ...base, [key]: at };
+            const hours = (from: number | null, to: number | null): number | null =>
+              from !== null && to !== null && to > from
+                ? Math.round(((to - from) / 3600000) * 10) / 10
+                : null;
+            draft.loadingHours = hours(draft.originArrivedAt, draft.originDepartedAt);
+            draft.unloadingHours = hours(draft.destinationArrivedAt, draft.destinationDepartedAt);
+            draft.chargeInr =
+              (draft.loadingHours !== null ? detentionCharge(draft.loadingHours) : 0) +
+              (draft.unloadingHours !== null ? detentionCharge(draft.unloadingHours) : 0);
+            return draft;
+          })();
+
+        set((s) => ({
+          shipments: s.shipments.map((sh) =>
+            sh.id === shipmentId ? { ...sh, detention: next } : sh,
+          ),
+        }));
+      },
+
+      rateShipment: async (shipmentId, stars, as) => {
+        const shipment = get().shipments.find((s) => s.id === shipmentId);
+        const clamped = Math.round(Math.min(5, Math.max(1, stars)));
+        if (!shipment || shipment.stage !== 'BALANCE_RELEASED') return;
+
+        // Optimistic — a star tap must feel instant.
+        const field = as === 'dealer' ? 'ratingByDealer' : 'ratingByDriver';
+        set((s) => ({
+          shipments: s.shipments.map((sh) =>
+            sh.id === shipmentId ? { ...sh, [field]: clamped } : sh,
+          ),
+        }));
+        try {
+          const remote = await api.rateShipment(shipmentId, clamped, as);
+          if (remote) {
+            set((s) => ({
+              shipments: s.shipments.map((sh) =>
+                sh.id === shipmentId ? { ...remote, pod: sh.pod ?? remote.pod } : sh,
+              ),
+            }));
+          }
+        } catch (error) {
+          console.warn('[escrow] rating sync failed', error);
         }
       },
     }),

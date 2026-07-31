@@ -9,6 +9,14 @@
 /** The two user personas the app serves (Feature B). */
 export type UserRole = 'driver' | 'dealer';
 
+/** Authenticated user, as returned by the auth endpoints. */
+export interface AuthUser {
+  id: string;
+  phone: string;
+  name: string | null;
+  role: UserRole | null;
+}
+
 /** Supported vernacular locales (Feature F). */
 export type Locale = 'en' | 'hi' | 'pa' | 'te' | 'ta';
 
@@ -46,6 +54,13 @@ export interface Load {
   status: LoadStatus;
   bids: Bid[];
   postedAt: number;
+  /** Consignment / LR number the POD must match (Feature 12). */
+  consignmentNo?: string;
+  /** Goods-in-transit insurance opted at posting. */
+  insured?: boolean;
+  insurancePremiumInr?: number;
+  /** Repositioning bonus when this lane is short of trucks. */
+  incentiveInr?: number;
 }
 
 export interface Bid {
@@ -55,6 +70,8 @@ export interface Bid {
   /** Driver's counter-offer in INR. */
   amountInr: number;
   rating: number;
+  /** KYC-verified driver badge — trust is the product in this market. */
+  kycVerified?: boolean;
   placedAt: number;
 }
 
@@ -83,12 +100,39 @@ export interface ProofOfDelivery {
   kind: PodKind;
   fileName: string;
   uploadedAt: number;
+  /** Consignment number read off the POD by OCR (Feature 12). */
+  ocrConsignmentNo?: string | null;
+  /** True when the OCR number matches the load's consignment number. */
+  verified?: boolean;
+}
+
+/** Geofenced waiting time at each stop, and what it costs. */
+export interface DetentionRecord {
+  originArrivedAt: number | null;
+  originDepartedAt: number | null;
+  destinationArrivedAt: number | null;
+  destinationDepartedAt: number | null;
+  loadingHours: number | null;
+  unloadingHours: number | null;
+  chargeInr: number;
+  settled: boolean;
+}
+
+export interface LedgerVerification {
+  intact: boolean;
+  entryCount: number;
+  brokenAt: number | null;
+  headHash: string | null;
+  detail: string;
 }
 
 export interface EscrowEvent {
   stage: EscrowStage;
   label: string;
   at: number;
+  /** Hash-chain links — absent on records written before chaining. */
+  prevHash?: string;
+  hash?: string;
 }
 
 export interface EscrowShipment {
@@ -104,6 +148,34 @@ export interface EscrowShipment {
   pod: ProofOfDelivery | null;
   /** Append-only audit trail rendered as the payment timeline. */
   events: EscrowEvent[];
+  /** Two-way ratings, settable once the shipment is fully settled. */
+  ratingByDealer?: number | null;
+  ratingByDriver?: number | null;
+  /** Expected consignment number, carried from the load (Feature 12). */
+  consignmentNo?: string;
+  /** Open dispute id — blocks balance release while set (Feature 13). */
+  disputeId?: string | null;
+  /** Goods-in-transit insurance, inherited from the load. */
+  insured?: boolean;
+  /** Factoring fee retained when the driver took an instant payout. */
+  instantPayoutFeeInr?: number;
+  /** e-Way bill number, once generated. */
+  ewayBillNumber?: string | null;
+  /** Aadhaar-eSigned digital LR state. */
+  contract?: ShipmentContract | null;
+  /** Set when this shipment is one leg of a chained round trip. */
+  chainId?: string;
+  chainLeg?: number;
+  chainLegs?: number;
+  /** Geofenced detention/demurrage record. */
+  detention?: DetentionRecord;
+}
+
+export interface ShipmentContract {
+  /** SHA-256 of the contract text — the tamper-evidence anchor. */
+  textHash: string;
+  signedByDealerAt: number | null;
+  signedByDriverAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +191,10 @@ export interface Amenity {
   /** Distance ahead of the truck along the current route. */
   distanceKm: number;
   rating: number;
-  /** Normalised 0..1 position on the simulated map canvas. */
+  /** Real GPS position — used by the native react-native-maps view. */
+  latitude: number;
+  longitude: number;
+  /** Normalised 0..1 position on the simulated web/canvas map. */
   mapX: number;
   mapY: number;
   /** Dhaba-only flags — undefined for mechanics. */
@@ -136,4 +211,491 @@ export interface FastagTransaction {
   /** Negative = toll debit, positive = top-up credit. */
   amountInr: number;
   at: number;
+}
+
+/** FASTag auto-recharge rule (Feature 14). */
+export interface AutoRechargeRule {
+  enabled: boolean;
+  thresholdInr: number;
+  topUpInr: number;
+}
+
+// ---------------------------------------------------------------------------
+// Chat, notifications, disputes (platform features 10, 11, 13)
+// ---------------------------------------------------------------------------
+
+export type ChatSenderRole = 'dealer' | 'driver';
+
+export interface ChatMessage {
+  id: string;
+  shipmentId: string;
+  senderId: string;
+  senderRole: ChatSenderRole;
+  text: string;
+  at: number;
+}
+
+export type NotificationKind =
+  | 'bid_received'
+  | 'bid_accepted'
+  | 'advance_paid'
+  | 'pod_uploaded'
+  | 'balance_released'
+  | 'dispute_raised'
+  | 'dispute_resolved'
+  | 'message';
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  shipmentId?: string;
+  at: number;
+  read: boolean;
+}
+
+export type DisputeReason = 'damaged_goods' | 'late_delivery' | 'shortage' | 'wrong_pod' | 'other';
+export type DisputeStatus = 'open' | 'under_review' | 'resolved';
+export type DisputeResolution = 'released' | 'refunded' | 'partial' | 'dismissed';
+
+export interface Dispute {
+  id: string;
+  shipmentId: string;
+  raisedByRole: ChatSenderRole;
+  reason: DisputeReason;
+  detail: string;
+  status: DisputeStatus;
+  resolution: DisputeResolution | null;
+  at: number;
+  resolvedAt: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Driver features: fuel prices, document locker, SOS
+// ---------------------------------------------------------------------------
+
+export interface FuelPrice {
+  city: string;
+  state: string;
+  dieselInrPerLitre: number;
+  updatedAt: number;
+}
+
+export type DocumentKind = 'rc' | 'dl' | 'insurance' | 'permit' | 'puc';
+
+export interface DriverDocument {
+  kind: DocumentKind;
+  fileName: string;
+  uri: string;
+  /** ISO date (YYYY-MM-DD); null when the doc has no expiry set yet. */
+  expiresOn: string | null;
+  addedAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// TruckSetu Money — mirrors server/src/types.ts
+// ---------------------------------------------------------------------------
+
+export interface ScoreFactor {
+  label: string;
+  value: string;
+  positive: boolean;
+}
+
+export interface PlatformScore {
+  score: number;
+  band: 'Building' | 'Fair' | 'Good' | 'Excellent';
+  factors: ScoreFactor[];
+}
+
+export interface DrivingScore {
+  score: number;
+  band: 'Needs work' | 'Fair' | 'Safe' | 'Elite';
+  discountPercent: number;
+  sampleSize: number;
+}
+
+export interface CreditDraw {
+  id: string;
+  amountInr: number;
+  at: number;
+  referenceId: string;
+}
+
+export interface CreditRepayment {
+  id: string;
+  amountInr: number;
+  at: number;
+  source: 'manual' | 'escrow';
+}
+
+export interface CreditFacility {
+  limitInr: number;
+  drawnInr: number;
+  availableInr: number;
+  aprPercent: number;
+  draws: CreditDraw[];
+  repayments: CreditRepayment[];
+}
+
+export interface EmiPlan {
+  id: string;
+  itemId: string;
+  itemLabel: string;
+  principalInr: number;
+  tenorMonths: number;
+  monthlyInr: number;
+  aprPercent: number;
+  paidInstalments: number;
+  outstandingInr: number;
+  status: 'active' | 'closed';
+  at: number;
+}
+
+export interface FuelCardTransaction {
+  id: string;
+  pump: string;
+  city: string;
+  litres: number;
+  amountInr: number;
+  discountInr: number;
+  cashbackInr: number;
+  at: number;
+}
+
+export interface FuelCardAccount {
+  last4: string;
+  creditLimitInr: number;
+  outstandingInr: number;
+  litresThisMonth: number;
+  savedInr: number;
+  transactions: FuelCardTransaction[];
+}
+
+export interface InvoiceAdvance {
+  id: string;
+  shipmentId: string;
+  invoiceNo: string;
+  faceValueInr: number;
+  feeInr: number;
+  netInr: number;
+  termDays: number;
+  dueAt: number;
+  status: 'advanced' | 'collected';
+  at: number;
+}
+
+/** A settled receivable the dealer can turn into cash today. */
+export interface DiscountableInvoice {
+  shipmentId: string;
+  invoiceNo: string;
+  route: string;
+  faceValueInr: number;
+  quote30: { faceValueInr: number; feeInr: number; netInr: number; dueAt: number };
+  quote60: { faceValueInr: number; feeInr: number; netInr: number; dueAt: number };
+}
+
+export interface VehicleLoanApplication {
+  id: string;
+  purpose: 'purchase' | 'refinance';
+  amountInr: number;
+  tenorMonths: number;
+  aprPercent: number;
+  emiInr: number;
+  status: 'submitted' | 'approved' | 'rejected';
+  at: number;
+}
+
+export interface InsurancePolicy {
+  id: string;
+  sumInsuredInr: number;
+  basePremiumInr: number;
+  discountPercent: number;
+  premiumInr: number;
+  validUntil: number;
+  at: number;
+}
+
+// ---------------------------------------------------------------------------
+// Marketplace — network effects
+// ---------------------------------------------------------------------------
+
+export interface ReturnGuarantee {
+  id: string;
+  city: string;
+  shipmentId: string;
+  windowHours: number;
+  standbyFeeInr: number;
+  status: 'active' | 'fulfilled' | 'standby_due' | 'paid';
+  startedAt: number;
+  expiresAt: number;
+  resolvedAt: number | null;
+  fulfilledByShipmentId: string | null;
+  paidAt: number | null;
+}
+
+export interface GuaranteeOffer {
+  city: string;
+  available: boolean;
+  openLoads: number;
+  windowHours: number;
+  standbyFeeInr: number;
+  reason: string;
+}
+
+export interface LaneDensity {
+  lane: string;
+  origin: string;
+  destination: string;
+  demand: number;
+  supply: number;
+  gap: number;
+  status: 'deficit' | 'balanced' | 'surplus';
+  incentiveInr: number;
+}
+
+export interface ChainLeg {
+  loadId: string;
+  origin: string;
+  destination: string;
+  material: string;
+  priceInr: number;
+}
+
+export interface TripChainQuote {
+  legs: ChainLeg[];
+  separateTotalInr: number;
+  chainedTotalInr: number;
+  shipperSavesInr: number;
+  driverPayoutInr: number;
+  driverGainsInr: number;
+  returnsToStart: boolean;
+}
+
+export interface ConsolidationGroup {
+  lane: string;
+  origin: string;
+  destination: string;
+  loadIds: string[];
+  totalTonnes: number;
+  fillPercent: number;
+  separateTotalInr: number;
+  pooledTotalInr: number;
+  savingPerShipperInr: number;
+}
+
+export interface LaneIndexRow {
+  lane: string;
+  origin: string;
+  destination: string;
+  avg7dInr: number | null;
+  avg30dInr: number | null;
+  trendPercent: number | null;
+  direction: 'up' | 'down' | 'flat' | 'new';
+  tripCount: number;
+  openAskInr: number | null;
+  perTonneInr: number | null;
+}
+
+export interface LaneIndex {
+  indexLevel: number;
+  laneCount: number;
+  tripCount: number;
+  generatedAt: number;
+  lanes: LaneIndexRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Suraksha membership: tiers, savings/pension, rewards, assistance
+// ---------------------------------------------------------------------------
+
+export type Tier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+
+export interface TierBenefits {
+  tier: Tier;
+  healthCoverInr: number;
+  accidentCoverInr: number;
+  cashbackPercent: number;
+  savingsMatchPercent: number;
+  legalCasesPerYear: number;
+  breakdownCalloutsPerYear: number;
+  breakdownSlaMinutes: number;
+}
+
+export interface SavingsTxn {
+  id: string;
+  kind: 'skim' | 'match' | 'interest' | 'withdrawal';
+  amountInr: number;
+  note: string;
+  at: number;
+}
+
+export interface SavingsAccount {
+  skimPercent: number;
+  savingsInr: number;
+  pensionInr: number;
+  matchedInr: number;
+  interestInr: number;
+  transactions: SavingsTxn[];
+  openedAt: number;
+}
+
+export interface RewardsSummary {
+  tier: Tier;
+  cashbackPercent: number;
+  earnedInr: number;
+  redeemedInr: number;
+  availableInr: number;
+  nextTierWouldHavePaidInr: number | null;
+}
+
+export interface MembershipSummary {
+  benefits: TierBenefits;
+  progress: { settledTrips: number; score: number; needTrips: number; needScore: number };
+  next: TierBenefits | null;
+  savings: SavingsAccount;
+  rewards: RewardsSummary;
+}
+
+// ---------------------------------------------------------------------------
+// Regulatory: VAHAN/SARATHI-backed compliance
+// ---------------------------------------------------------------------------
+
+export interface ComplianceItem {
+  kind: 'registration' | 'fitness' | 'insurance' | 'puc' | 'permit' | 'licence';
+  label: string;
+  validUpto: string;
+  daysLeft: number;
+  status: 'valid' | 'expiring' | 'expired';
+}
+
+export interface VehicleCompliance {
+  vehicleNumber: string;
+  canBid: boolean;
+  blockingReasons: string[];
+  expiringCount: number;
+  items: ComplianceItem[];
+  checkedAt: number;
+}
+
+export type LegalCaseKind =
+  | 'challan'
+  | 'rto_seizure'
+  | 'police_stop'
+  | 'accident_claim'
+  | 'overloading_notice'
+  | 'other';
+
+export interface AssistanceCase {
+  id: string;
+  kind: LegalCaseKind;
+  detail: string;
+  latitude: number | null;
+  longitude: number | null;
+  status: 'open' | 'assigned' | 'resolved';
+  covered: boolean;
+  advocateName: string | null;
+  outcome?: string;
+  at: number;
+  resolvedAt: number | null;
+}
+
+export interface BreakdownCase {
+  id: string;
+  latitude: number;
+  longitude: number;
+  problem: string;
+  status: 'dispatched' | 'on_site' | 'resolved';
+  covered: boolean;
+  garageName: string | null;
+  garagePhone: string | null;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+  slaMinutes: number;
+  slaDeadlineAt: number;
+  note?: string;
+  at: number;
+  arrivedAt: number | null;
+  resolvedAt: number | null;
+  slaMet: boolean | null;
+}
+
+export interface AssistanceSummary {
+  helpline: string;
+  legal: { used: number; allowed: number; cases: AssistanceCase[] };
+  breakdown: {
+    used: number;
+    allowed: number;
+    slaMinutes: number;
+    cases: BreakdownCase[];
+  };
+  garages: { name: string; city: string; latitude: number; longitude: number; phone: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// GST reconciliation (GSTR-2A/2B matching)
+// ---------------------------------------------------------------------------
+
+export type MatchStatus = 'matched' | 'missing_in_portal' | 'missing_in_books' | 'value_mismatch';
+
+export interface ReconRow {
+  invoiceNo: string;
+  shipmentId: string | null;
+  route: string;
+  booksTaxableInr: number | null;
+  booksGstInr: number | null;
+  portalTaxableInr: number | null;
+  portalGstInr: number | null;
+  status: MatchStatus;
+  itcClaimableInr: number;
+  note: string;
+}
+
+export interface Reconciliation {
+  period: string;
+  treatment: 'reverse_charge' | 'forward_charge';
+  rows: ReconRow[];
+  summary: {
+    booksCount: number;
+    portalCount: number;
+    matched: number;
+    missingInPortal: number;
+    missingInBooks: number;
+    valueMismatch: number;
+    itcClaimableInr: number;
+    itcBlockedInr: number;
+  };
+}
+
+/** Everything the driver's marketplace surface renders. */
+export interface MarketSummary {
+  city: string;
+  guarantee: GuaranteeOffer;
+  activeGuarantee: ReturnGuarantee | null;
+  lanes: LaneDensity[];
+  chain: TripChainQuote | null;
+  consolidation: ConsolidationGroup[];
+}
+
+/** Everything the Money screen renders, in one shape. */
+export interface MoneySummary {
+  score: PlatformScore;
+  driving: DrivingScore | null;
+  facility: CreditFacility;
+  fuelCard: FuelCardAccount;
+  emis: EmiPlan[];
+  advances: InvoiceAdvance[];
+  discountable: DiscountableInvoice[];
+  vehicleLoans: VehicleLoanApplication[];
+  policies: InsurancePolicy[];
+  insuranceQuote: {
+    sumInsuredInr: number;
+    basePremiumInr: number;
+    drivingScore: number | null;
+    discountPercent: number;
+    premiumInr: number;
+    savedInr: number;
+  };
+  bureauConsent: boolean;
 }

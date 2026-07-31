@@ -33,6 +33,20 @@ export interface TranslationKeys {
   fastagBalance: string;
   topUpViaUpi: string;
   youAreOffline: string;
+  /** Auth (phone-OTP login): */
+  enterPhone: string;
+  sendOtp: string;
+  enterOtp: string;
+  verifyOtp: string;
+  changeNumber: string;
+  signOut: string;
+  /** Driver features: */
+  returnLoads: string;
+  documentsTitle: string;
+  fuelPricesTitle: string;
+  placeBid: string;
+  voiceAmenitySummary: string;
+  voiceAssistant: string;
 }
 
 export const SUPPORTED_LOCALES: { code: Locale; label: string }[] = [
@@ -60,6 +74,18 @@ const translations: Record<Locale, TranslationKeys> = {
     fastagBalance: 'FASTag Balance',
     topUpViaUpi: 'Top Up via UPI',
     youAreOffline: 'You are offline — GPS points are being cached on device',
+    enterPhone: 'Mobile number',
+    sendOtp: 'Send OTP',
+    enterOtp: 'Enter the 6-digit OTP',
+    verifyOtp: 'Verify & Continue',
+    changeNumber: 'Change number',
+    signOut: 'Sign out',
+    returnLoads: 'Return Loads',
+    documentsTitle: 'My Documents',
+    fuelPricesTitle: 'Diesel Prices',
+    placeBid: 'Place Bid',
+    voiceAmenitySummary: '{count} stops ahead on your route. Nearest is {name}, {km} kilometres away.',
+    voiceAssistant: 'Ask Setu',
   },
   hi: {
     appTagline: 'लोड और ट्रक के बीच भरोसे का सेतु',
@@ -77,6 +103,18 @@ const translations: Record<Locale, TranslationKeys> = {
     fastagBalance: 'फास्टैग बैलेंस',
     topUpViaUpi: 'UPI से टॉप-अप करें',
     youAreOffline: 'आप ऑफ़लाइन हैं — GPS डेटा डिवाइस पर सेव हो रहा है',
+    enterPhone: 'मोबाइल नंबर',
+    sendOtp: 'OTP भेजें',
+    enterOtp: '6 अंकों का OTP दर्ज करें',
+    verifyOtp: 'सत्यापित करें और आगे बढ़ें',
+    changeNumber: 'नंबर बदलें',
+    signOut: 'साइन आउट',
+    returnLoads: 'वापसी के लोड',
+    documentsTitle: 'मेरे दस्तावेज़',
+    fuelPricesTitle: 'डीज़ल के दाम',
+    placeBid: 'बोली लगाएं',
+    voiceAmenitySummary: 'आपके रास्ते में {count} ठिकाने हैं। सबसे नज़दीक {name}, {km} किलोमीटर दूर।',
+    voiceAssistant: 'सेतु से पूछो',
   },
   pa: {
     appTagline: 'ਲੋਡ ਅਤੇ ਟਰੱਕ ਵਿਚਕਾਰ ਭਰੋਸੇ ਦਾ ਪੁਲ',
@@ -94,6 +132,18 @@ const translations: Record<Locale, TranslationKeys> = {
     fastagBalance: 'ਫਾਸਟੈਗ ਬੈਲੰਸ',
     topUpViaUpi: 'UPI ਨਾਲ ਟਾਪ-ਅੱਪ ਕਰੋ',
     youAreOffline: 'ਤੁਸੀਂ ਔਫਲਾਈਨ ਹੋ — GPS ਡਾਟਾ ਡਿਵਾਈਸ ਤੇ ਸੇਵ ਹੋ ਰਿਹਾ ਹੈ',
+    enterPhone: 'ਮੋਬਾਈਲ ਨੰਬਰ',
+    sendOtp: 'OTP ਭੇਜੋ',
+    enterOtp: '6 ਅੰਕਾਂ ਦਾ OTP ਦਰਜ ਕਰੋ',
+    verifyOtp: 'ਤਸਦੀਕ ਕਰੋ ਤੇ ਅੱਗੇ ਵਧੋ',
+    changeNumber: 'ਨੰਬਰ ਬਦਲੋ',
+    signOut: 'ਸਾਈਨ ਆਊਟ',
+    returnLoads: 'ਵਾਪਸੀ ਦੇ ਲੋਡ',
+    documentsTitle: 'ਮੇਰੇ ਦਸਤਾਵੇਜ਼',
+    fuelPricesTitle: 'ਡੀਜ਼ਲ ਦੇ ਭਾਅ',
+    placeBid: 'ਬੋਲੀ ਲਗਾਓ',
+    voiceAmenitySummary: 'ਤੁਹਾਡੇ ਰਾਹ ਵਿੱਚ {count} ਟਿਕਾਣੇ ਹਨ। ਸਭ ਤੋਂ ਨੇੜੇ {name}, {km} ਕਿਲੋਮੀਟਰ ਦੂਰ।',
+    voiceAssistant: 'ਸੇਤੂ ਤੋਂ ਪੁੱਛੋ',
   },
   te: {
     appTagline: 'లోడ్లు మరియు ట్రక్కుల మధ్య నమ్మకమైన వంతెన',
@@ -111,6 +161,18 @@ const translations: Record<Locale, TranslationKeys> = {
     fastagBalance: 'FASTag బ్యాలెన్స్',
     topUpViaUpi: 'UPI తో టాప్-అప్',
     youAreOffline: 'మీరు ఆఫ్‌లైన్‌లో ఉన్నారు — GPS డేటా పరికరంలో సేవ్ అవుతోంది',
+    enterPhone: 'మొబైల్ నంబర్',
+    sendOtp: 'OTP పంపండి',
+    enterOtp: '6 అంకెల OTP నమోదు చేయండి',
+    verifyOtp: 'ధృవీకరించి కొనసాగండి',
+    changeNumber: 'నంబర్ మార్చండి',
+    signOut: 'సైన్ అవుట్',
+    returnLoads: 'తిరుగు లోడ్లు',
+    documentsTitle: 'నా పత్రాలు',
+    fuelPricesTitle: 'డీజిల్ ధరలు',
+    placeBid: 'బిడ్ వేయండి',
+    voiceAmenitySummary: 'మీ దారిలో {count} స్థలాలు ఉన్నాయి. అతి దగ్గరగా {name}, {km} కిలోమీటర్ల దూరంలో.',
+    voiceAssistant: 'సేతును అడగండి',
   },
   ta: {
     appTagline: 'லோடுகளுக்கும் லாரிகளுக்கும் இடையிலான நம்பிக்கை பாலம்',
@@ -128,6 +190,18 @@ const translations: Record<Locale, TranslationKeys> = {
     fastagBalance: 'FASTag இருப்பு',
     topUpViaUpi: 'UPI மூலம் டாப்-அப்',
     youAreOffline: 'நீங்கள் ஆஃப்லைனில் — GPS தரவு சாதனத்தில் சேமிக்கப்படுகிறது',
+    enterPhone: 'மொபைல் எண்',
+    sendOtp: 'OTP அனுப்பவும்',
+    enterOtp: '6 இலக்க OTP-ஐ உள்ளிடவும்',
+    verifyOtp: 'சரிபார்த்து தொடரவும்',
+    changeNumber: 'எண்ணை மாற்றவும்',
+    signOut: 'வெளியேறு',
+    returnLoads: 'திரும்பும் லோடுகள்',
+    documentsTitle: 'என் ஆவணங்கள்',
+    fuelPricesTitle: 'டீசல் விலைகள்',
+    placeBid: 'ஏலம் விடவும்',
+    voiceAmenitySummary: 'உங்கள் வழியில் {count} இடங்கள் உள்ளன. அருகில் {name}, {km} கிலோமீட்டர் தொலைவில்.',
+    voiceAssistant: 'சேதுவிடம் கேளுங்கள்',
   },
 };
 

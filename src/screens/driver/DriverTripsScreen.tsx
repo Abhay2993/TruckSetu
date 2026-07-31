@@ -6,11 +6,15 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { ArtTrim } from '../../components/ArtTrim';
+import { IndianTruck } from '../../components/IndianTruck';
 import { ScreenHeader } from '../../components/ScreenHeader';
 import { useTranslation } from '../../i18n/i18n';
+import { computeTruckScore } from '../../services/creditScore';
 import { splitAmounts, useEscrowStore } from '../../stores/useEscrowStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../../theme';
 import type { EscrowShipment } from '../../types';
@@ -33,6 +37,7 @@ function payoutSummary(shipment: EscrowShipment): { received: number; locked: nu
 export function DriverTripsScreen(): React.JSX.Element {
   const t = useTranslation();
   const shipments = useEscrowStore((s) => s.shipments);
+  const truckScore = computeTruckScore(shipments);
 
   const totals = shipments.reduce(
     (acc, s) => {
@@ -47,18 +52,53 @@ export function DriverTripsScreen(): React.JSX.Element {
       <ScreenHeader />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Earnings overview */}
-        <View style={styles.totalsCard}>
+        <LinearGradient
+          colors={[colors.primary, colors.primaryDark]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.totalsCard}
+        >
           <View style={styles.totalCol}>
             <Text style={styles.totalValue}>{formatINR(totals.received)}</Text>
             <Text style={styles.totalLabel}>{t('advanceReceived')}</Text>
           </View>
           <View style={styles.totalsDivider} />
           <View style={styles.totalCol}>
-            <Text style={[styles.totalValue, { color: colors.warning }]}>
+            <Text style={[styles.totalValue, { color: colors.accent }]}>
               {formatINR(totals.locked)}
             </Text>
             <Text style={styles.totalLabel}>{t('lockedInEscrow')}</Text>
           </View>
+        </LinearGradient>
+
+        {/* TruckScore — platform credit score, the NBFC lending foundation */}
+        <View style={styles.scoreCard}>
+          <View style={styles.scoreTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.scoreLabel}>TruckScore™</Text>
+              <Text style={styles.scoreBand}>{truckScore.band}</Text>
+            </View>
+            <Text style={styles.scoreValue}>{truckScore.score}</Text>
+          </View>
+          <ArtTrim height={6} opacity={0.85} />
+          <View style={styles.scoreFactors}>
+            {truckScore.factors.map((f) => (
+              <View key={f.label} style={styles.factorChip}>
+                <Ionicons
+                  name={f.positive ? 'checkmark-circle' : 'remove-circle'}
+                  size={12}
+                  color={f.positive ? colors.success : colors.textMuted}
+                />
+                <Text style={styles.factorText}>
+                  {f.label}: {f.value}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <Text style={styles.scoreLoan}>
+            Eligible for up to {formatINR(truckScore.maxLoanInr)} tyre/repair credit — every settled
+            trip raises your score.
+          </Text>
         </View>
 
         <Text style={styles.sectionTitle}>My trips</Text>
@@ -92,7 +132,10 @@ export function DriverTripsScreen(): React.JSX.Element {
         })}
 
         {shipments.length === 0 && (
-          <Text style={styles.emptyText}>No trips yet — accepted loads appear here.</Text>
+          <View style={styles.emptyBox}>
+            <IndianTruck width={180} />
+            <Text style={styles.emptyText}>No trips yet — accepted loads appear here.</Text>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -111,7 +154,6 @@ const styles = StyleSheet.create({
   },
   totalsCard: {
     flexDirection: 'row',
-    backgroundColor: colors.primary,
     borderRadius: radii.lg,
     padding: spacing.lg,
     ...cardShadow,
@@ -141,6 +183,60 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.textPrimary,
     marginTop: spacing.sm,
+  },
+  scoreCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    ...cardShadow,
+  },
+  scoreTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  scoreLabel: {
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    color: colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  scoreBand: {
+    fontSize: fontSizes.lg,
+    fontWeight: '800',
+    color: colors.textPrimary,
+  },
+  scoreValue: {
+    fontSize: 40,
+    fontWeight: '900',
+    color: colors.accent,
+    fontVariant: ['tabular-nums'],
+  },
+  scoreFactors: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  factorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.background,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  factorText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  scoreLoan: {
+    fontSize: fontSizes.xs,
+    color: colors.textSecondary,
   },
   tripCard: {
     backgroundColor: colors.surface,
@@ -178,10 +274,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.warning,
   },
+  emptyBox: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+  },
   emptyText: {
     textAlign: 'center',
     color: colors.textMuted,
     fontSize: fontSizes.sm,
-    paddingVertical: spacing.xl,
   },
 });

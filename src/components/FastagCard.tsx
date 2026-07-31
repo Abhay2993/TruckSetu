@@ -5,11 +5,16 @@
  */
 
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import Svg, { Line, Path, Rect } from 'react-native-svg';
 import { useTranslation } from '../i18n/i18n';
+import { IndianTruck } from './IndianTruck';
+import { api } from '../services/api';
 import { LOW_BALANCE_THRESHOLD_INR, useFastagStore } from '../stores/useFastagStore';
 import { cardShadow, colors, fontSizes, radii, spacing } from '../theme';
+import { confirmAction, notify } from '../utils/dialog';
 import { formatINR } from '../utils/format';
 
 const QUICK_AMOUNTS = [500, 1000, 2000] as const;
@@ -19,27 +24,90 @@ export function FastagCard(): React.JSX.Element {
   const balanceInr = useFastagStore((s) => s.balanceInr);
   const isToppingUp = useFastagStore((s) => s.isToppingUp);
   const topUp = useFastagStore((s) => s.topUp);
+  const autoRecharge = useFastagStore((s) => s.autoRecharge);
+  const setAutoRecharge = useFastagStore((s) => s.setAutoRecharge);
+  const payToll = useFastagStore((s) => s.payToll);
   const [selectedAmount, setSelectedAmount] = useState<number>(500);
 
   const isLow = balanceInr < LOW_BALANCE_THRESHOLD_INR;
 
+  const handleToll = async () => {
+    const { autoRecharged } = await payToll(250, 'Shahjahanpur Plaza');
+    if (autoRecharged) {
+      notify('Auto-recharge triggered', `Balance dropped below ${formatINR(autoRecharge.thresholdInr)} — ${formatINR(autoRecharge.topUpInr)} added automatically.`);
+    }
+  };
+
   const handleTopUp = async () => {
+    // Real-UPI path (phones, server mode): open the user's UPI app with a
+    // pre-filled payment, then confirm. Production hardening: the wallet
+    // credit should be driven by the PSP webhook, not this confirmation —
+    // the server endpoint for that is already in place.
+    if (Platform.OS !== 'web') {
+      try {
+        const intent = await api.getFastagTopUpIntent(selectedAmount);
+        if (intent) {
+          await Linking.openURL(intent.upiUri);
+          const paid = await confirmAction(
+            'Complete the payment',
+            `Pay ${formatINR(selectedAmount)} to ${intent.payeeVpa} in your UPI app, then confirm here.`,
+            'I have paid',
+          );
+          if (!paid) return;
+        }
+      } catch {
+        notify('No UPI app found', 'Install any UPI app (GPay, PhonePe, Paytm) to top up.');
+        return;
+      }
+    }
+
     const ok = await topUp(selectedAmount);
     if (ok) {
-      Alert.alert('Top-up successful', `${formatINR(selectedAmount)} added via UPI.`);
+      notify('Top-up successful', `${formatINR(selectedAmount)} added via UPI.`);
     } else {
-      Alert.alert('Top-up failed', 'UPI payment could not be completed. Please try again.');
+      notify('Top-up failed', 'UPI payment could not be completed. Please try again.');
     }
   };
 
   return (
-    <View style={styles.card}>
+    <LinearGradient
+      colors={[colors.primary, colors.primaryDark]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.card}
+    >
+      {/* Watermark lorry — gives the wallet the feel of a real NETC card */}
+      <View style={styles.watermark} pointerEvents="none">
+        <IndianTruck width={170} shadow={false} />
+      </View>
+
       <View style={styles.headerRow}>
         <View style={styles.titleRow}>
           <MaterialCommunityIcons name="boom-gate" size={18} color={colors.textInverse} />
           <Text style={styles.title}>{t('fastagBalance')}</Text>
         </View>
-        <Ionicons name="wallet" size={18} color={colors.textInverse} />
+        <Text style={styles.netcLabel}>NETC · FASTag</Text>
+      </View>
+
+      {/* EMV chip + contactless waves */}
+      <View style={styles.chipRow}>
+        <Svg width={38} height={28} viewBox="0 0 38 28">
+          <Rect x={1} y={1} width={36} height={26} rx={5} fill="#E8C15A" stroke="#C9A23B" strokeWidth={1.5} />
+          <Line x1={13} y1={1} x2={13} y2={27} stroke="#C9A23B" strokeWidth={1.2} />
+          <Line x1={25} y1={1} x2={25} y2={27} stroke="#C9A23B" strokeWidth={1.2} />
+          <Line x1={1} y1={14} x2={37} y2={14} stroke="#C9A23B" strokeWidth={1.2} />
+        </Svg>
+        <Svg width={26} height={26} viewBox="0 0 26 26">
+          {[4, 9, 14].map((r) => (
+            <Path
+              key={r}
+              d={`M ${8 + r * 0.2} ${13 - r} A ${r} ${r} 0 0 1 ${8 + r * 0.2} ${13 + r}`}
+              stroke="rgba(255,255,255,0.75)"
+              strokeWidth={2}
+              fill="none"
+            />
+          ))}
+        </Svg>
       </View>
 
       <Text style={styles.balance}>{formatINR(balanceInr)}</Text>
@@ -86,17 +154,65 @@ export function FastagCard(): React.JSX.Element {
           </>
         )}
       </Pressable>
-    </View>
+
+      {/* Feature 14: auto-recharge rule */}
+      <View style={styles.autoRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.autoTitle}>Auto-recharge</Text>
+          <Text style={styles.autoSub}>
+            {autoRecharge.enabled
+              ? `On · +${formatINR(autoRecharge.topUpInr)} when below ${formatINR(autoRecharge.thresholdInr)}`
+              : 'Off · never run dry at a toll'}
+          </Text>
+        </View>
+        <Switch
+          value={autoRecharge.enabled}
+          onValueChange={(enabled) => void setAutoRecharge({ ...autoRecharge, enabled })}
+          trackColor={{ true: colors.accent, false: 'rgba(255,255,255,0.3)' }}
+          thumbColor={colors.textInverse}
+        />
+      </View>
+
+      {/* Demo the rule: a toll debit that may trigger the auto top-up */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Simulate toll"
+        onPress={handleToll}
+        style={({ pressed }) => [styles.tollButton, pressed && { opacity: 0.7 }]}
+      >
+        <MaterialCommunityIcons name="boom-gate-arrow-up" size={14} color={colors.textInverse} />
+        <Text style={styles.tollButtonText}>Simulate toll (₹250)</Text>
+      </Pressable>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.primary,
     borderRadius: radii.lg,
     padding: spacing.lg,
     gap: spacing.sm,
+    overflow: 'hidden',
     ...cardShadow,
+  },
+  watermark: {
+    position: 'absolute',
+    right: -26,
+    top: 6,
+    opacity: 0.1,
+  },
+  netcLabel: {
+    color: colors.textInverse,
+    opacity: 0.7,
+    fontSize: fontSizes.xs,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: 2,
   },
   headerRow: {
     flexDirection: 'row',
@@ -174,5 +290,40 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: fontSizes.md,
     fontWeight: '800',
+  },
+  autoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.15)',
+    paddingTop: spacing.md,
+    marginTop: 2,
+  },
+  autoTitle: {
+    color: colors.textInverse,
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+  },
+  autoSub: {
+    color: colors.textInverse,
+    opacity: 0.75,
+    fontSize: fontSizes.xs,
+    marginTop: 1,
+  },
+  tollButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderRadius: radii.sm,
+    paddingVertical: spacing.sm,
+  },
+  tollButtonText: {
+    color: colors.textInverse,
+    fontSize: fontSizes.xs,
+    fontWeight: '700',
   },
 });
